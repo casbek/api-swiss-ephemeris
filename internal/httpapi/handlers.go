@@ -109,6 +109,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			{Path: "/v1/transits", Method: "POST", Description: "The sky at a moment and its aspects to a birth chart"},
 			{Path: "/v1/synastry", Method: "POST", Description: "Aspects between two birth charts"},
 			{Path: "/v1/composite", Method: "POST", Description: "A relationship chart, by midpoint or Davison"},
+			{Path: "/v1/progressions", Method: "POST", Description: "A birth chart moved forward, by secondary progression or solar arc"},
+			{Path: "/v1/returns", Method: "POST", Description: "Solar and lunar return charts"},
 		},
 	}
 	writeCacheableJSON(w, r, resp, "public, max-age=300")

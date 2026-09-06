@@ -94,6 +94,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/transits", s.handleTransits)
 	mux.HandleFunc("POST /v1/synastry", s.handleSynastry)
 	mux.HandleFunc("POST /v1/composite", s.handleComposite)
+	mux.HandleFunc("POST /v1/progressions", s.handleProgressions)
+	mux.HandleFunc("POST /v1/returns", s.handleReturns)
 
 	// Anything else is a 404 in problem+json rather than the plain text
 	// ServeMux would produce.

@@ -3,6 +3,7 @@ package astro
 import (
 	"math"
 	"sort"
+	"time"
 )
 
 // lookaheadDays is the step used to tell an applying aspect from a separating
@@ -37,6 +38,15 @@ type Aspect struct {
 
 	// IsExact is true when the orb is under a minute of arc.
 	IsExact bool `json:"is_exact"`
+
+	// ExactAt is when the aspect perfects, for a comparison where one side
+	// moves and the other stands still, such as a transit. It is absent when
+	// nothing moves, when the moving body is at a station, or when the
+	// crossing is further off than the search allows.
+	//
+	// A body that turns retrograde over the aspect perfects it three times.
+	// This reports the nearest of them.
+	ExactAt *time.Time `json:"exact_at,omitempty"`
 }
 
 // exactThreshold is one minute of arc, in degrees.

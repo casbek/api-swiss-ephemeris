@@ -3,6 +3,8 @@ package astro
 import (
 	"context"
 
+	"github.com/casbek/api-swiss-ephemeris/internal/libswe"
+	"github.com/casbek/api-swiss-ephemeris/internal/swe"
 	"github.com/casbek/api-swiss-ephemeris/internal/tz"
 )
 
@@ -67,12 +69,14 @@ func (e *Engine) Transits(ctx context.Context, req TransitRequest) (*TransitResu
 		return nil, prefixField(err, "transit")
 	}
 
-	return &TransitResult{
-		Natal:   natal,
-		Transit: transit,
-		Aspects: CrossAspects(transit.Positions, natalTargets(natal),
-			transit.Settings.AspectTypes, transit.Settings.Orbs),
-	}, nil
+	aspects := CrossAspects(transit.Positions, natalTargets(natal),
+		transit.Settings.AspectTypes, transit.Settings.Orbs)
+
+	if err := e.resolveExactTimes(ctx, aspects, transit, natal, transit.Settings); err != nil {
+		return nil, err
+	}
+
+	return &TransitResult{Natal: natal, Transit: transit, Aspects: aspects}, nil
 }
 
 // natalTargets is everything a transit can aspect: the natal bodies and, when
@@ -141,4 +145,102 @@ func prefixField(err error, prefix string) error {
 		return err
 	}
 	return &tz.FieldError{Field: prefix + "." + fe.Field, Message: fe.Message}
+}
+
+// resolveExactTimes fills in when each transit perfects.
+//
+// The natal side stands still, so the question is when the transiting body
+// reaches the exact degree. Each aspect is already within orb, so the answer
+// is close and refining from the transit moment finds it in a few steps
+// rather than by searching a window.
+func (e *Engine) resolveExactTimes(ctx context.Context, aspects []Aspect,
+	transit *Chart, natal *Chart, settings Settings) error {
+
+	if len(aspects) == 0 {
+		return nil
+	}
+
+	transiting := make(map[string]Position, len(transit.Positions))
+	for _, p := range transit.Positions {
+		transiting[p.Body] = p
+	}
+	natalPoints := make(map[string]Position)
+	for _, p := range natalTargets(natal) {
+		natalPoints[p.Body] = p
+	}
+
+	opts := settings.sweOptions(transit.Location)
+	jd := transit.Moment.JulianDayUT
+
+	return e.calc.Do(ctx, func(s *swe.Session) error {
+		for i := range aspects {
+			a := &aspects[i]
+
+			moving, ok := transiting[a.From]
+			if !ok {
+				continue
+			}
+			fixed, ok := natalPoints[a.To]
+			if !ok {
+				continue
+			}
+			longitudeAt, ok := e.longitudeFunc(s, a.From, opts)
+			if !ok {
+				continue
+			}
+
+			// An aspect has two exact degrees, one either side of the natal
+			// point. The one being approached is the nearer.
+			target := fixed.Longitude + a.Angle
+			if Separation(moving.Longitude, fixed.Longitude-a.Angle) <
+				Separation(moving.Longitude, target) {
+				target = fixed.Longitude - a.Angle
+			}
+
+			exact, found, err := refine(longitudeAt, Normalize(target), jd, maxExactSearchDays)
+			if err != nil {
+				return err
+			}
+			if !found {
+				continue
+			}
+
+			moment, err := MomentFromJD(exact)
+			if err != nil {
+				return err
+			}
+			utc := moment.UTC
+			a.ExactAt = &utc
+		}
+		return nil
+	})
+}
+
+// maxExactSearchDays bounds how far ahead or behind an exact moment is looked
+// for. The outer planets can hold an aspect within orb for years, and a date
+// that far off says more about the orb than about the transit.
+const maxExactSearchDays = 400
+
+// longitudeFunc builds a reader for one body's longitude and motion, or
+// reports false for a point that has no motion of its own to follow.
+func (e *Engine) longitudeFunc(s *swe.Session, name string, opts swe.Options) (longitudeFunc, bool) {
+	body, ok := LookupBody(name)
+	if !ok || body.Category == CategoryAngle {
+		return nil, false
+	}
+
+	if !body.Derived() {
+		return func(jd float64) (float64, float64, error) {
+			res, err := s.Calc(jd, body.SwissID, opts)
+			return res.Longitude, res.SpeedLong, err
+		}, true
+	}
+
+	if body.Name == "south_node" {
+		return func(jd float64) (float64, float64, error) {
+			res, err := s.Calc(jd, libswe.TrueNode, opts)
+			return Normalize(res.Longitude + 180), res.SpeedLong, err
+		}, true
+	}
+	return nil, false
 }

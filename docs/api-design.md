@@ -269,9 +269,13 @@ slower bodies, which is what practitioners expect. Any entry can be overridden
 per request through `settings.aspects.orbs`.
 
 Each aspect reports whether it is applying or separating, derived from the
-relative speed of the two bodies. The moment an aspect perfects is not reported
-on a natal chart; finding it needs a search over the ephemeris and belongs with
-the transit endpoints, where the question is actually asked.
+relative speed of the two bodies.
+
+`/v1/transits` also reports `exact_at`, the moment the aspect perfects. It is
+absent on a natal chart, where nothing moves, and on a transit where the moving
+body is at a station or the crossing is further off than a year. A body that
+turns retrograde over an aspect perfects it three times; the nearest is the one
+reported.
 
 Where a pair satisfies more than one aspect, which can happen once orbs are
 widened, only the tightest is reported. Points that are opposite one another by
@@ -330,6 +334,35 @@ ever in the sky in that arrangement, and the response says so.
 `davison` casts a real chart for the midpoint in time and in place. Its
 positions were genuinely in the sky at that instant, so the response carries
 the moment and the location, which a midpoint composite has not got.
+
+## Moving a chart forward
+
+`/v1/progressions` offers two techniques.
+
+`secondary` (the default) counts one day of the ephemeris for one year of life,
+so a chart progressed to age thirty four is cast for thirty four days after the
+birth. Every body moves at its own rate. The chart is cast for the birthplace,
+so its angles move at the rate the sky turned in the days after the birth. Its
+houses are its own; reading progressed bodies against the natal houses instead
+is equally common, and the natal chart is in the same response.
+
+`solar_arc` moves every point forward by one arc, the distance the progressed
+Sun has travelled, which comes to roughly a degree a year. Because everything
+moves together the directed chart has exactly the natal aspects, so only its
+contacts with the natal chart carry information. The angles are directed too,
+which is the reason the technique is used.
+
+## Returns
+
+`/v1/returns` finds when the Sun or the Moon comes back to the degree it held
+at birth, and casts the chart of that moment. It searches forward from `from`,
+and `count` asks for successive returns: a solar return a year apart, a lunar
+one roughly every 27.32 days.
+
+The moment is a fact about the body and does not depend on where the chart is
+cast. `location` decides only the houses, and defaults to the birthplace;
+casting the return for wherever the person actually is at the time is the other
+common practice.
 
 ## House systems
 
