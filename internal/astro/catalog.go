@@ -237,8 +237,9 @@ func LookupHouseSystem(name string) (HouseSystem, bool) {
 	return h, ok
 }
 
-// Aspect is an angular relationship between two positions.
-type Aspect struct {
+// AspectType is a defined angular relationship. A specific occurrence of one
+// between two positions in a chart is an Aspect; see aspects.go.
+type AspectType struct {
 	Name  string  `json:"name"`
 	Angle float64 `json:"angle"`
 
@@ -250,7 +251,7 @@ type Aspect struct {
 	InDefaultSet bool   `json:"in_default_set"`
 }
 
-var aspects = []Aspect{
+var aspects = []AspectType{
 	{Name: "conjunction", Angle: 0, OrbFactor: 1.0, Category: "major", InDefaultSet: true},
 	{Name: "opposition", Angle: 180, OrbFactor: 1.0, Category: "major", InDefaultSet: true},
 	{Name: "trine", Angle: 120, OrbFactor: 1.0, Category: "major", InDefaultSet: true},
@@ -265,19 +266,19 @@ var aspects = []Aspect{
 	{Name: "biquintile", Angle: 144, OrbFactor: 0.3, Category: "minor"},
 }
 
-var aspectIndex = func() map[string]Aspect {
-	m := make(map[string]Aspect, len(aspects))
+var aspectIndex = func() map[string]AspectType {
+	m := make(map[string]AspectType, len(aspects))
 	for _, a := range aspects {
 		m[a.Name] = a
 	}
 	return m
 }()
 
-// Aspects returns the supported aspects.
-func Aspects() []Aspect { return append([]Aspect(nil), aspects...) }
+// AspectTypes returns the supported aspect definitions.
+func AspectTypes() []AspectType { return append([]AspectType(nil), aspects...) }
 
-// LookupAspect finds an aspect by name.
-func LookupAspect(name string) (Aspect, bool) {
+// LookupAspect finds an aspect definition by name.
+func LookupAspect(name string) (AspectType, bool) {
 	a, ok := aspectIndex[strings.ToLower(strings.TrimSpace(name))]
 	return a, ok
 }

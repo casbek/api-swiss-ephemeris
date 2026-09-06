@@ -137,6 +137,12 @@ fractional position within the house, so 8.53 is 53 percent of the way through
 the eighth house. `house` and `house_position` are omitted by endpoints that do
 not compute houses.
 
+A body's house is decided by which pair of cusps its longitude falls between.
+That is what practitioners mean by the house a body is in, and it gives the
+same answer in both zodiacs and in every house system. It follows that ecliptic
+latitude plays no part, so for a body well off the ecliptic a more refined
+method can disagree within a fraction of a degree of a cusp.
+
 ## The meta object
 
 Every response carries a `meta` block describing how the result was produced.
@@ -263,7 +269,33 @@ slower bodies, which is what practitioners expect. Any entry can be overridden
 per request through `settings.aspects.orbs`.
 
 Each aspect reports whether it is applying or separating, derived from the
-relative speed of the two bodies, and the moment it becomes exact.
+relative speed of the two bodies. The moment an aspect perfects is not reported
+on a natal chart; finding it needs a search over the ephemeris and belongs with
+the transit endpoints, where the question is actually asked.
+
+Where a pair satisfies more than one aspect, which can happen once orbs are
+widened, only the tightest is reported. Points that are opposite one another by
+construction are skipped entirely: the descendant is defined as the degree
+opposite the ascendant, the imum coeli as the degree opposite the midheaven and
+the south node as the point opposite the north, so an exact opposition between
+any of them holds in every chart ever cast and would head every aspect list
+while saying nothing about the chart.
+
+## Essential dignity
+
+Every classical planet carries a `dignity` object giving its domicile,
+exaltation, detriment, fall, triplicity by sect, Egyptian bound and Chaldean
+face, with the Ptolemaic weights summed into a score. The score is a summary
+rather than a verdict; practitioners weigh these differently.
+
+Nothing is reported for the outer planets, the nodes or the asteroids. The
+scheme predates their discovery, and the rulerships assigned to them since are
+modern additions that practitioners disagree about, so the field is absent
+rather than taking a side.
+
+A chart is a day chart when the Sun is above the horizon, which is to say in
+houses seven to twelve. That decides which triplicity ruler applies, so the
+sect is reported alongside.
 
 ## House systems
 

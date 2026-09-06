@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/casbek/api-swiss-ephemeris/internal/astro"
 	"github.com/casbek/api-swiss-ephemeris/internal/config"
 	"github.com/casbek/api-swiss-ephemeris/internal/swe"
 )
@@ -22,10 +23,11 @@ const healthPath = "/health"
 
 // Server holds everything the handlers need.
 type Server struct {
-	cfg  *config.Config
-	log  *slog.Logger
-	calc *swe.Calculator
-	http *http.Server
+	cfg    *config.Config
+	log    *slog.Logger
+	calc   *swe.Calculator
+	engine *astro.Engine
+	http   *http.Server
 
 	startedAt time.Time
 
@@ -46,6 +48,7 @@ func New(cfg *config.Config, log *slog.Logger, calc *swe.Calculator) *Server {
 		cfg:       cfg,
 		log:       log,
 		calc:      calc,
+		engine:    astro.NewEngine(calc),
 		startedAt: time.Now(),
 		listening: make(chan struct{}),
 	}
@@ -87,6 +90,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/license", s.handleLicense)
 	mux.HandleFunc("GET /v1/reference/{topic}", s.handleReference)
 	mux.HandleFunc("POST /v1/time", s.handleTime)
+	mux.HandleFunc("POST /v1/natal", s.handleNatal)
 
 	// Anything else is a 404 in problem+json rather than the plain text
 	// ServeMux would produce.
