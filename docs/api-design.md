@@ -41,6 +41,42 @@ applied to it. This matters: a birth certificate that records a local clock
 time is best expressed with `timezone`, while an offset should only be used
 when the offset itself is known to be correct.
 
+Naming the zone more than once is a contradiction, not something to resolve by
+precedence, so a request that combines `timezone` with `utc_offset`, or either
+of them with an offset inside `time`, is rejected.
+
+### Unknown birth time
+
+`time` may be omitted. Midday local time is then used, `flags.time_known` is
+false and a note says so. Midday is the conventional choice because it
+minimises the error in the Moon's position across the day. Houses, angles and
+anything derived from them are not reported for such a chart: they depend
+entirely on the time and would be pure invention.
+
+### Readings that are not instants
+
+Twice a year a local reading does not name one instant, and both cases are
+reported in `flags.anomaly` rather than resolved quietly.
+
+`nonexistent` means the clocks went forward over the reading, so it never
+occurred. The instant returned is the one the clock showed after the change.
+Turkey moved from 03:00 to 04:00 on 27 March 2016, so 03:30 that day is such a
+reading.
+
+`ambiguous` means the clocks went back over the reading, so it occurred twice,
+and `flags.candidates` lists both instants. Turkey moved from 04:00 back to
+03:00 on 8 November 2015, so 03:30 that morning is such a reading, and the two
+candidates are an hour apart. The later one is used; a client that knows which
+is meant should send `utc_offset` instead.
+
+### Supported years
+
+The ephemeris files shipped with the service cover **1800 to 2399**. A date
+outside that range is rejected with a `422`. This is deliberate: Swiss
+Ephemeris does not fail outside the range, it falls back to the lower precision
+Moshier ephemeris and keeps answering, so accepting the request would mean
+quietly returning a worse chart.
+
 ### `location`
 
 ```json
@@ -161,12 +197,18 @@ request.
 | `/v1/retrogrades` | GET | Retrograde stations and periods |
 | `/v1/eclipses` | GET | Solar and lunar eclipses |
 | `/v1/rise-set` | POST | Rise, set and meridian transit times |
+| `/v1/time` | POST | Resolve a local reading into an instant and a Julian Day |
 | `/v1/reference/{topic}` | GET | Supported bodies, house systems, ayanamshas, aspects |
 | `/v1/license` | GET | Licence terms and a link to the source |
 | `/health` | GET | Liveness and readiness |
 
 `/v1/reference/*` lets a client discover what the service supports instead of
 asking, which keeps the documentation burden down as options are added.
+
+`/v1/time` exists because time zone handling is where results most often
+disagree between services. It exposes the conversion on its own, with the zone,
+the offset, the daylight saving state and both Julian Days visible, so a client
+can settle a discrepancy without opening a support ticket.
 
 ## Default bodies
 

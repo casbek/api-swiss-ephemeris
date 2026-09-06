@@ -104,6 +104,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			{Path: "/v1", Method: "GET", Description: "This index"},
 			{Path: "/v1/license", Method: "GET", Description: "Licence terms and source location"},
 			{Path: "/v1/reference/{topic}", Method: "GET", Description: "Supported bodies, signs, house systems, aspects and ayanamshas"},
+			{Path: "/v1/time", Method: "POST", Description: "Resolve a local date and time into an instant and a Julian Day"},
 		},
 	}
 	writeCacheableJSON(w, r, resp, "public, max-age=300")
