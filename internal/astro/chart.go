@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/casbek/api-swiss-ephemeris/internal/libswe"
 	"github.com/casbek/api-swiss-ephemeris/internal/swe"
@@ -51,11 +52,7 @@ type Chart struct {
 	Obliquity float64
 }
 
-// Cast computes a chart.
-//
-// Every ephemeris call happens inside one session, so the whole chart comes
-// from a single consistent pass on one thread rather than from values gathered
-// piecemeal.
+// Cast validates a request and computes the chart it describes.
 func (e *Engine) Cast(ctx context.Context, req ChartRequest) (*Chart, error) {
 	if err := req.Location.Validate(); err != nil {
 		return nil, err
@@ -71,16 +68,51 @@ func (e *Engine) Cast(ctx context.Context, req ChartRequest) (*Chart, error) {
 		return nil, err
 	}
 
+	return e.cast(ctx, moment, req.Location, settings)
+}
+
+// MomentFromJD rebuilds a moment from a Julian Day, for charts that are
+// derived from other charts rather than cast for a stated time.
+func MomentFromJD(jdUT float64) (Moment, error) {
+	y, mo, d, h, mi, sec := swe.JDToUTC(jdUT)
+
+	whole := math.Trunc(sec)
+	utc := time.Date(y, time.Month(mo), d, h, mi, int(whole),
+		int((sec-whole)*1e9), time.UTC)
+
+	tt, ut, err := swe.UTCToJD(y, mo, d, h, mi, sec)
+	if err != nil {
+		return Moment{}, err
+	}
+
+	return Moment{
+		UTC:         utc,
+		Local:       utc,
+		TimeKnown:   true,
+		JulianDayUT: ut,
+		JulianDayTT: tt,
+		Zone: tz.Zone{
+			Name: "UTC", Offset: "+00:00", Source: tz.SourceFixedOffset,
+		},
+	}, nil
+}
+
+// cast computes a chart from an already resolved moment and settings.
+//
+// Every ephemeris call happens inside one session, so the whole chart comes
+// from a single consistent pass on one thread rather than from values gathered
+// piecemeal.
+func (e *Engine) cast(ctx context.Context, moment Moment, location Location, settings Settings) (*Chart, error) {
 	chart := &Chart{
 		Moment:   moment,
-		Location: req.Location,
+		Location: location,
 		Settings: settings,
 	}
 
-	opts := settings.sweOptions(req.Location)
+	opts := settings.sweOptions(location)
 	jd := moment.JulianDayUT
 
-	err = e.calc.Do(ctx, func(s *swe.Session) error {
+	err := e.calc.Do(ctx, func(s *swe.Session) error {
 		// The obliquity is needed to derive declinations, and is worth
 		// reporting in its own right.
 		eclNut, err := s.Calc(jd, libswe.EclNut, swe.Options{})
@@ -98,7 +130,7 @@ func (e *Engine) Cast(ctx context.Context, req ChartRequest) (*Chart, error) {
 		// Houses depend entirely on the time of day. With an unknown birth
 		// time they would be invention, so they are left out.
 		if moment.TimeKnown {
-			raw, err := s.Houses(jd, req.Location.Latitude, req.Location.Longitude,
+			raw, err := s.Houses(jd, location.Latitude, location.Longitude,
 				settings.HouseSystem.Letter, opts)
 			if err != nil {
 				return fmt.Errorf("houses: %w", err)

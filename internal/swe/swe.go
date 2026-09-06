@@ -263,3 +263,12 @@ func UTCToJD(year, month, day, hour, minute int, sec float64) (et, ut float64, e
 func JDToUTC(jdUT float64) (year, month, day, hour, minute int, sec float64) {
 	return libswe.JDUT1ToUTC(jdUT, libswe.GregCal)
 }
+
+// HousesFromARMC computes house cusps from a sidereal time and a latitude,
+// for charts that have no single moment of their own.
+func (s *Session) HousesFromARMC(armc, lat, eps float64, hsys byte) (libswe.HousesResult, error) {
+	if !s.valid {
+		panic("swe: Session used outside Calculator.Do")
+	}
+	return libswe.HousesARMC(armc, lat, eps, hsys)
+}

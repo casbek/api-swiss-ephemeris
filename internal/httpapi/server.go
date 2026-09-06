@@ -91,6 +91,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/reference/{topic}", s.handleReference)
 	mux.HandleFunc("POST /v1/time", s.handleTime)
 	mux.HandleFunc("POST /v1/natal", s.handleNatal)
+	mux.HandleFunc("POST /v1/transits", s.handleTransits)
+	mux.HandleFunc("POST /v1/synastry", s.handleSynastry)
+	mux.HandleFunc("POST /v1/composite", s.handleComposite)
 
 	// Anything else is a 404 in problem+json rather than the plain text
 	// ServeMux would produce.

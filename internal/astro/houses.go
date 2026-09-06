@@ -23,6 +23,11 @@ type Houses struct {
 	// vertex, in that order. They are ordinary positions so they can carry
 	// aspects like any other point.
 	Angles []Position `json:"angles"`
+
+	// ARMC is the right ascension of the midheaven, the sidereal time the
+	// division was built from. A composite chart is derived from it, since
+	// it has no moment of its own to cast for.
+	ARMC float64 `json:"armc"`
 }
 
 // gauquelinSectors is the number of divisions the Gauquelin system uses
@@ -40,6 +45,7 @@ func buildHouses(system HouseSystem, cusps [37]float64, ascmc [10]float64) *Hous
 		System:      system.Name,
 		SystemLabel: system.Label,
 		Cusps:       make([]Cusp, 0, count),
+		ARMC:        Normalize(ascmc[2]),
 	}
 
 	for i := 1; i <= count; i++ {

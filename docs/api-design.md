@@ -297,6 +297,40 @@ A chart is a day chart when the Sun is above the horizon, which is to say in
 houses seven to twelve. That decides which triplicity ruler applies, so the
 sect is reported alongside.
 
+## Comparing two charts
+
+`/v1/transits`, `/v1/synastry` and `/v1/composite` all compare two sets of
+positions. In every one of them `from` names a point in the first set and `to`
+a point in the second, and the two are never mixed: a transiting body is
+compared with every natal point but not with the other transiting bodies, whose
+aspects belong to the transit chart itself.
+
+For transits the first set is always the transiting side and the second the
+natal one. The natal angles are included as targets, since a transit to the
+ascendant or midheaven is among the most watched of all. The transit chart
+defaults to the natal location, which is what makes its houses readable.
+
+A validation failure names the half of the request it came from, so an error
+reads `chart_b.datetime.timezone` or `transit.datetime.timezone` rather than
+leaving a client to work out which chart was wrong.
+
+### Composite charts
+
+The two methods are different techniques, not variations on one, and they
+routinely disagree by degrees.
+
+`midpoint` (the default) puts every point halfway between the two charts,
+taking the shorter way round the circle. Its houses come from the midpoint of
+the two charts' sidereal times at the midpoint of their latitudes; halving each
+cusp individually is the other approach in circulation, but it can leave the
+cusps out of order, since a house division does not survive being averaged
+piece by piece. A midpoint composite is not a chart of any moment, nothing was
+ever in the sky in that arrangement, and the response says so.
+
+`davison` casts a real chart for the midpoint in time and in place. Its
+positions were genuinely in the sky at that instant, so the response carries
+the moment and the location, which a midpoint composite has not got.
+
 ## House systems
 
 Every system Swiss Ephemeris implements is exposed. The letter column is the

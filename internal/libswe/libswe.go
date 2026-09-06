@@ -351,3 +351,25 @@ func FixStarUT(star string, tjdUT float64, iflag int32) (name string, res CalcRe
 		Flags: int32(rc),
 	}, nil
 }
+
+// HousesARMC computes house cusps from a sidereal time rather than from a
+// moment, which is what a composite chart needs: there is no single instant to
+// cast it for, only a midpoint between two.
+func HousesARMC(armc, geolat, eps float64, hsys byte) (HousesResult, error) {
+	var res HousesResult
+	var cusps [37]C.double
+	var ascmc [10]C.double
+
+	rc := C.swe_houses_armc(C.double(armc), C.double(geolat), C.double(eps),
+		C.int(hsys), &cusps[0], &ascmc[0])
+	for i := range cusps {
+		res.Cusps[i] = float64(cusps[i])
+	}
+	for i := range ascmc {
+		res.ASCMC[i] = float64(ascmc[i])
+	}
+	if rc < 0 {
+		return res, errors.New("swe_houses_armc: house system could not be computed")
+	}
+	return res, nil
+}

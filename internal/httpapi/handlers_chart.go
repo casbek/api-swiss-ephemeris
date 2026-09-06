@@ -8,6 +8,9 @@ import (
 	"github.com/casbek/api-swiss-ephemeris/internal/tz"
 )
 
+// rfc3339 is the layout every timestamp in a response uses.
+const rfc3339 = time.RFC3339
+
 // natalResponse is a cast chart.
 type natalResponse struct {
 	Bodies       []astro.Position   `json:"bodies"`
@@ -82,8 +85,8 @@ func buildNatalResponse(c *astro.Chart, ephemeris string) natalResponse {
 		Sect:         c.Sect,
 		Notes:        notesFor(c.Moment),
 		Meta: chartMeta{
-			UTC:         c.Moment.UTC.Format(time.RFC3339),
-			Local:       c.Moment.Local.Format(time.RFC3339),
+			UTC:         c.Moment.UTC.Format(rfc3339),
+			Local:       c.Moment.Local.Format(rfc3339),
 			Zone:        c.Moment.Zone,
 			JulianDayUT: c.Moment.JulianDayUT,
 			JulianDayTT: c.Moment.JulianDayTT,
