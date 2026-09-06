@@ -1,0 +1,68 @@
+[Unit]
+Description=Swiss Ephemeris calculation API
+Documentation=https://github.com/casbek/api-swiss-ephemeris
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=swisseph
+Group=swisseph
+WorkingDirectory=/opt/swisseph-api
+ExecStart=/opt/swisseph-api/bin/api
+Restart=on-failure
+RestartSec=2s
+
+Environment=APP_ENV=production
+Environment=LISTEN_ADDR=127.0.0.1:8080
+Environment=EPHE_PATH=/opt/swisseph-api/ephe
+Environment=SWE_WORKERS=1
+Environment=LOG_LEVEL=info
+
+# Keys are secrets and do not belong in a world readable unit file.
+# Put API_KEYS=... in this file, owned by root and mode 0600.
+EnvironmentFile=-/etc/swisseph-api/secrets.env
+
+# The service writes logs to stdout only; journald collects them. Never point
+# this at a file: an application that writes its own log can fill the disk,
+# whereas journald enforces the caps set in journald.conf. See
+# deploy/systemd/README.md.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=swisseph-api
+
+# The process reads its ephemeris files and answers HTTP. It needs nothing
+# else, so take the rest away.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+
+# The whole filesystem is read only under ProtectSystem=strict, which suits a
+# service that only reads its ephemeris files.
+ReadOnlyPaths=/opt/swisseph-api
+
+# Restarting on failure is right, but a crash loop should be visible rather
+# than hidden by endless retries.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target
