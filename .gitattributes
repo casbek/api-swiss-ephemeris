@@ -1,6 +1,6 @@
-# Kaynak dosyalar deponun icinde her zaman LF ile tutulur.
-# Dagitim hedefi Linux; CRLF derleme ve betiklerde sorun cikarir.
+# Source files are always stored with LF in the repository.
+# The deployment target is Linux, where CRLF breaks builds and shell scripts.
 * text=auto eol=lf
 
-# Ephemeris veri dosyalari ikili bicimdedir, hicbir donusum uygulanmamali.
+# Ephemeris data files are binary and must never be converted.
 *.se1 binary

@@ -10,21 +10,20 @@ import (
 	"github.com/casbek/api-swiss-ephemeris/internal/libswe"
 )
 
-// ErrPoolClosed, kapatilmis bir havuza is gonderildiginde doner.
-var ErrPoolClosed = errors.New("swe: havuz kapatildi")
+// ErrPoolClosed is returned when work is submitted to a closed pool.
+var ErrPoolClosed = errors.New("swe: pool is closed")
 
-// pool, Swiss Ephemeris cagrilarini kendine ait OS thread'leri uzerinde
-// calistiran bir is havuzudur.
+// pool runs Swiss Ephemeris calls on OS threads it owns.
 //
-// Neden gerekli: Swiss Ephemeris global durum tutar. Linux/GCC uzerinde bu
-// durum thread-local'dir (sweodef.h icindeki TLS tanimi), yani her OS
-// thread'inin kendi swe_set_ephe_path cagrisina ve kendi dosya onbellegine
-// ihtiyaci vardir. Windows'ta ise TLS devre disidir ve durum tum thread'ler
-// arasinda paylasilir, dolayisiyla es zamanli cagrilar veri yarisi yaratir.
+// Swiss Ephemeris keeps global state. On Linux with GCC that state is
+// thread-local, through the TLS definition in sweodef.h, so every OS thread
+// needs its own swe_set_ephe_path call and its own file cache. On Windows the
+// thread-local storage is disabled and the state is shared, so concurrent
+// calls race.
 //
-// Her iki durumu da tek cozumle karsilamak icin worker'lar runtime.LockOSThread
-// ile sabit bir OS thread'ine baglanir ve o thread uzerinde bir kez
-// ilklendirilir. Isler kanal uzerinden bu thread'lere yonlendirilir.
+// A single design covers both cases: workers pin themselves to an OS thread
+// with runtime.LockOSThread, initialise the library once on that thread, and
+// receive work over a channel.
 type pool struct {
 	tasks chan *task
 	quit  chan struct{}
@@ -37,20 +36,20 @@ type task struct {
 	done chan struct{}
 }
 
-// newPool, ephePath dizinini kullanan ve workers adet OS thread'i ayiran
-// bir havuz olusturur.
+// newPool starts a pool that reads ephemeris files from ephePath and reserves
+// workers OS threads.
 //
-// workers icin varsayilan 1'dir ve cogu kurulum icin yeterlidir: tek bir
-// natal harita hesabi 1 ms'nin altinda surer. Linux'ta TLS aktif oldugu icin
-// deger guvenle artirilabilir; ancak her worker kendi ephemeris dosya
-// onbellegini tuttugundan bellek kullanimi worker sayisiyla dogru orantili
-// buyur. Windows'ta 1'den buyuk deger GUVENLI DEGILDIR.
+// One worker is the default and is enough for most deployments: a natal chart
+// takes well under a millisecond. On Linux the count can safely be raised
+// because the library state is thread-local, though memory grows with it since
+// each worker keeps its own ephemeris file cache. On Windows more than one
+// worker is not safe.
 func newPool(ephePath string, workers int) (*pool, error) {
 	if workers < 1 {
 		workers = 1
 	}
 	if runtime.GOOS == "windows" && workers > 1 {
-		return nil, fmt.Errorf("swe: Windows uzerinde Swiss Ephemeris thread-safe degil, workers=1 olmali (verilen: %d)", workers)
+		return nil, fmt.Errorf("swe: Swiss Ephemeris is not thread safe on Windows, workers must be 1, got %d", workers)
 	}
 
 	p := &pool{
@@ -63,15 +62,15 @@ func newPool(ephePath string, workers int) (*pool, error) {
 		p.wg.Add(1)
 		go p.run(ephePath, ready)
 	}
-	// Tum worker'lar ephemeris yolunu ayarlayana kadar bekle.
+	// Wait until every worker has set its ephemeris path.
 	for i := 0; i < workers; i++ {
 		<-ready
 	}
 	return p, nil
 }
 
-// run, tek bir worker'in dongusudur. Kendini bir OS thread'ine kilitler,
-// Swiss Ephemeris'i o thread icin ilklendirir ve isleri sirayla calistirir.
+// run is the loop of a single worker. It pins itself to an OS thread,
+// initialises Swiss Ephemeris for that thread and then runs tasks in order.
 func (p *pool) run(ephePath string, ready chan<- struct{}) {
 	defer p.wg.Done()
 
@@ -79,7 +78,7 @@ func (p *pool) run(ephePath string, ready chan<- struct{}) {
 	defer runtime.UnlockOSThread()
 
 	libswe.SetEphePath(ephePath)
-	// Close, bu thread'in acik tuttugu ephemeris dosyalarini serbest birakir.
+	// Release the ephemeris files this thread holds open.
 	defer libswe.Close()
 
 	ready <- struct{}{}
@@ -95,12 +94,11 @@ func (p *pool) run(ephePath string, ready chan<- struct{}) {
 	}
 }
 
-// do, fn fonksiyonunu bir Swiss Ephemeris thread'i uzerinde calistirir ve
-// bitmesini bekler.
+// do runs fn on a Swiss Ephemeris thread and waits for it to finish.
 //
-// ctx yalnizca is siraya alinirken beklemeyi kesebilir. Is bir kez worker'a
-// verildikten sonra bitmesi beklenir; aksi halde fn'in cagiranin degiskenlerine
-// yaptigi yazmalar veri yarisi olustururdu.
+// ctx can only cancel the wait for a free worker. Once a task has been handed
+// over it is always awaited, because fn writes to the caller's variables and
+// abandoning it would race with the caller reading them.
 func (p *pool) do(ctx context.Context, fn func()) error {
 	t := &task{fn: fn, done: make(chan struct{})}
 
@@ -116,7 +114,7 @@ func (p *pool) do(ctx context.Context, fn func()) error {
 	return nil
 }
 
-// close, worker'lari durdurur ve ephemeris dosyalarini kapatir.
+// close stops the workers and releases the ephemeris files.
 func (p *pool) close() {
 	p.once.Do(func() {
 		close(p.quit)

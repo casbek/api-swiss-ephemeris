@@ -1,9 +1,9 @@
-// Package libswe, Swiss Ephemeris 2.10.03 C kutuphanesinin ham cgo sarmalayicisidir.
+// Package libswe contains the raw cgo bindings for the Swiss Ephemeris 2.10.03
+// C library.
 //
-// DIKKAT: Bu paketteki fonksiyonlar dogrudan cagrilmamalidir. Swiss Ephemeris
-// global durum tutar (Linux/GCC uzerinde thread-local, Windows'ta paylasimli),
-// bu yuzden tum cagrilar internal/swe paketindeki worker havuzu uzerinden
-// yapilmalidir. Bkz. internal/swe/pool.go
+// Do not call these functions directly. Swiss Ephemeris keeps global state,
+// which is thread-local on Linux with GCC and shared on Windows. Every call
+// must go through the worker pool in internal/swe; see internal/swe/pool.go.
 package libswe
 
 /*
@@ -24,20 +24,20 @@ import (
 	"unsafe"
 )
 
-// errBufSize, Swiss Ephemeris'in AS_MAXCH sabitiyle ayni olmalidir.
+// errBufSize must match the AS_MAXCH constant of Swiss Ephemeris.
 const errBufSize = 256
 
-// maxStarName, swe_fixstar2_ut icin SE_MAX_STNAME + 1 boyutundadir.
+// maxStarName is SE_MAX_STNAME + 1, the buffer size swe_fixstar2_ut expects.
 const maxStarName = 256
 
-// newErrBuf, C tarafina verilecek hata tamponunu ve serbest birakma
-// fonksiyonunu dondurur.
+// newErrBuf allocates the error buffer passed to C and returns it along with
+// its release function.
 func newErrBuf() (*C.char, func()) {
 	buf := (*C.char)(C.calloc(errBufSize, 1))
 	return buf, func() { C.free(unsafe.Pointer(buf)) }
 }
 
-// errFrom, C hata tamponunu Go hatasina cevirir. Tampon bossa nil doner.
+// errFrom converts a C error buffer into a Go error, or nil if it is empty.
 func errFrom(buf *C.char) error {
 	msg := C.GoString(buf)
 	if msg == "" {
@@ -46,18 +46,18 @@ func errFrom(buf *C.char) error {
 	return errors.New(msg)
 }
 
-// SetEphePath, ephemeris dosyalarinin bulundugu dizini ayarlar.
-// Her OS thread'i icin ayri ayri cagrilmalidir (TLS).
+// SetEphePath sets the directory holding the ephemeris data files. It must be
+// called separately for every OS thread, since the state is thread-local.
 func SetEphePath(path string) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 	C.swe_set_ephe_path(cPath)
 }
 
-// Close, acik ephemeris dosyalarini kapatir ve bellegi serbest birakir.
+// Close releases the open ephemeris files and their memory.
 func Close() { C.swe_close() }
 
-// Version, kutuphane surumunu dondurur.
+// Version reports the version of the underlying library.
 func Version() string {
 	buf := (*C.char)(C.calloc(errBufSize, 1))
 	defer C.free(unsafe.Pointer(buf))
@@ -65,14 +65,14 @@ func Version() string {
 	return C.GoString(buf)
 }
 
-// Julday, takvim tarihini Julian Day'e cevirir. hour ondalikli saattir (UT).
-// gregflag icin GregCal veya JulCal kullanin.
+// Julday converts a calendar date to a Julian Day. hour is the decimal hour in
+// UT. Pass GregCal or JulCal for gregflag.
 func Julday(year, month, day int, hour float64, gregflag int) float64 {
 	return float64(C.swe_julday(C.int(year), C.int(month), C.int(day),
 		C.double(hour), C.int(gregflag)))
 }
 
-// Revjul, Julian Day'i takvim tarihine cevirir.
+// Revjul converts a Julian Day back to a calendar date.
 func Revjul(jd float64, gregflag int) (year, month, day int, hour float64) {
 	var y, m, d C.int
 	var h C.double
@@ -80,8 +80,8 @@ func Revjul(jd float64, gregflag int) (year, month, day int, hour float64) {
 	return int(y), int(m), int(d), float64(h)
 }
 
-// UTCToJD, UTC tarih/saatini Julian Day'e cevirir. Artik saniyeleri dikkate alir.
-// Donen degerlerden et TT (Terrestrial Time), ut ise UT1 cinsindendir.
+// UTCToJD converts a UTC date and time to a Julian Day, accounting for leap
+// seconds. It returns the moment in TT (Terrestrial Time) and in UT1.
 func UTCToJD(year, month, day, hour, minute int, sec float64, gregflag int) (et, ut float64, err error) {
 	var dret [2]C.double
 	buf, free := newErrBuf()
@@ -95,7 +95,7 @@ func UTCToJD(year, month, day, hour, minute int, sec float64, gregflag int) (et,
 	return float64(dret[0]), float64(dret[1]), nil
 }
 
-// JDUT1ToUTC, UT1 cinsinden Julian Day'i UTC takvim degerlerine cevirir.
+// JDUT1ToUTC converts a UT1 Julian Day to UTC calendar values.
 func JDUT1ToUTC(jdUT float64, gregflag int) (year, month, day, hour, minute int, sec float64) {
 	var y, mo, d, h, mi C.int32_t
 	var s C.double
@@ -103,7 +103,7 @@ func JDUT1ToUTC(jdUT float64, gregflag int) (year, month, day, hour, minute int,
 	return int(y), int(mo), int(d), int(h), int(mi), float64(s)
 }
 
-// DeltaT, verilen Julian Day icin delta T degerini (gun cinsinden) dondurur.
+// DeltaT returns delta T for the given Julian Day, in days.
 func DeltaT(jd float64, ephFlag int32) (float64, error) {
 	buf, free := newErrBuf()
 	defer free()
@@ -111,10 +111,11 @@ func DeltaT(jd float64, ephFlag int32) (float64, error) {
 	return float64(v), errFrom(buf)
 }
 
-// CalcResult, bir gok cismi hesabinin sonucudur.
-// Longitude/Latitude derece, Distance AU, hiz degerleri derece veya AU/gun
-// cinsindendir. Ekvatoral bayrak verildiginde Longitude/Latitude yerine
-// sag acilim/deklinasyon degerleri doner.
+// CalcResult holds the computed position of a celestial body.
+//
+// Longitude and Latitude are in degrees, Distance is in AU, and the speeds are
+// in degrees or AU per day. When the equatorial flag is set, Longitude and
+// Latitude carry right ascension and declination instead.
 type CalcResult struct {
 	Longitude     float64 `json:"longitude"`
 	Latitude      float64 `json:"latitude"`
@@ -123,17 +124,17 @@ type CalcResult struct {
 	SpeedLat      float64 `json:"speed_latitude"`
 	SpeedDistance float64 `json:"speed_distance"`
 
-	// Flags, Swiss Ephemeris'in gercekte uyguladigi bayraklardir. Istenen
-	// bayraklardan farkli olabilir (orn. ephemeris dosyasi bulunamayip
-	// Moshier'e dusulmesi).
+	// Flags are the flags Swiss Ephemeris actually applied, which can differ
+	// from the ones requested: it falls back to the Moshier ephemeris when a
+	// data file is missing.
 	Flags int32 `json:"-"`
 
-	// Warning, hesap basarili oldugu halde kutuphanenin dondurdugu uyaridir.
+	// Warning carries a message the library returned alongside a successful
+	// result.
 	Warning string `json:"warning,omitempty"`
 }
 
-// CalcUT, tjdUT (UT1 Julian Day) aninda ipl numarali gok cisminin
-// konumunu hesaplar.
+// CalcUT computes the position of body ipl at tjdUT, a UT1 Julian Day.
 func CalcUT(tjdUT float64, ipl int, iflag int32) (CalcResult, error) {
 	var xx [6]C.double
 	buf, free := newErrBuf()
@@ -151,14 +152,15 @@ func CalcUT(tjdUT float64, ipl int, iflag int32) (CalcResult, error) {
 		SpeedDistance: float64(xx[5]),
 		Flags:         int32(rc),
 	}
-	// rc >= 0 iken serr dolu olabilir; bu bir uyaridir, hata degil.
+	// serr can hold a message even when rc >= 0. That is a warning, not a
+	// failure.
 	if msg := C.GoString(buf); msg != "" {
 		res.Warning = msg
 	}
 	return res, nil
 }
 
-// PlanetName, gok cisminin adini dondurur.
+// PlanetName returns the name of a celestial body.
 func PlanetName(ipl int) string {
 	buf := (*C.char)(C.calloc(errBufSize, 1))
 	defer C.free(unsafe.Pointer(buf))
@@ -166,19 +168,20 @@ func PlanetName(ipl int) string {
 	return C.GoString(buf)
 }
 
-// HousesResult, ev hesabinin sonucudur.
+// HousesResult holds the result of a house calculation.
 type HousesResult struct {
-	// Cusps, 1..12 indislerinde ev baslangiclarini tutar. 0. indis kullanilmaz.
-	// Gauquelin sistemi (G) icin 1..36 doludur.
+	// Cusps holds the house cusps at indices 1..12; index 0 is unused. The
+	// Gauquelin system (G) fills 1..36 instead.
 	Cusps [37]float64
 
-	// ASCMC sirasi: Asc, MC, ARMC, Vertex, EquatorialAsc,
-	// CoAsc(Koch), CoAsc(Munkasey), PolarAsc(Munkasey)
+	// ASCMC holds, in order: Ascendant, MC, ARMC, Vertex, equatorial
+	// Ascendant, co-Ascendant (Koch), co-Ascendant (Munkasey) and polar
+	// Ascendant (Munkasey).
 	ASCMC [10]float64
 }
 
-// HousesEx, verilen an ve konum icin ev sistemini hesaplar.
-// hsys, ev sistemi harfidir (P = Placidus, K = Koch, W = Whole Sign ...).
+// HousesEx computes the house cusps for a moment and place. hsys is the house
+// system letter: P for Placidus, K for Koch, W for whole sign, and so on.
 func HousesEx(tjdUT float64, iflag int32, geolat, geolon float64, hsys byte) (HousesResult, error) {
 	var res HousesResult
 	var cusps [37]C.double
@@ -192,13 +195,13 @@ func HousesEx(tjdUT float64, iflag int32, geolat, geolon float64, hsys byte) (Ho
 		res.ASCMC[i] = float64(ascmc[i])
 	}
 	if rc < 0 {
-		return res, errors.New("swe_houses_ex: ev sistemi hesaplanamadi")
+		return res, errors.New("swe_houses_ex: house system could not be computed")
 	}
 	return res, nil
 }
 
-// HousePos, bir gok cisminin hangi evde oldugunu ondalikli olarak dondurur
-// (orn. 8.53 => 8. evin yuzde 53'unde).
+// HousePos returns the house a position falls in as a fraction, so 8.53 means
+// 53 percent of the way through the eighth house.
 func HousePos(armc, geolat, eps float64, hsys byte, lon, lat float64) (float64, error) {
 	buf, free := newErrBuf()
 	defer free()
@@ -211,12 +214,12 @@ func HousePos(armc, geolat, eps float64, hsys byte, lon, lat float64) (float64, 
 	return float64(v), nil
 }
 
-// SetSidMode, sidereal (Vedik) mod icin ayanamsa secer.
+// SetSidMode selects the ayanamsha used in sidereal mode.
 func SetSidMode(sidMode int32, t0, ayanT0 float64) {
 	C.swe_set_sid_mode(C.int32_t(sidMode), C.double(t0), C.double(ayanT0))
 }
 
-// GetAyanamsa, verilen an icin ayanamsa degerini derece olarak dondurur.
+// GetAyanamsa returns the ayanamsha for the given moment, in degrees.
 func GetAyanamsa(tjdUT float64, iflag int32) (float64, error) {
 	var daya C.double
 	buf, free := newErrBuf()
@@ -228,13 +231,13 @@ func GetAyanamsa(tjdUT float64, iflag int32) (float64, error) {
 	return float64(daya), nil
 }
 
-// SetTopo, topocentrik hesaplar icin gozlemci konumunu ayarlar.
+// SetTopo sets the observer position used for topocentric calculations.
 func SetTopo(geolon, geolat, geoalt float64) {
 	C.swe_set_topo(C.double(geolon), C.double(geolat), C.double(geoalt))
 }
 
-// Pheno, gok cisminin faz acisi, aydinlanma orani ve parlakligi gibi
-// gorunum bilgileridir.
+// Pheno describes the appearance of a body: its phase, elongation and
+// brightness.
 type Pheno struct {
 	PhaseAngle     float64 `json:"phase_angle"`
 	PhaseIllumined float64 `json:"phase_illuminated"`
@@ -243,7 +246,7 @@ type Pheno struct {
 	ApparentMag    float64 `json:"apparent_magnitude"`
 }
 
-// PhenoUT, gok cisminin gorunum bilgilerini hesaplar.
+// PhenoUT computes the appearance of a body.
 func PhenoUT(tjdUT float64, ipl int, iflag int32) (Pheno, error) {
 	var attr [20]C.double
 	buf, free := newErrBuf()
@@ -261,9 +264,10 @@ func PhenoUT(tjdUT float64, ipl int, iflag int32) (Pheno, error) {
 	}, nil
 }
 
-// RiseTrans, bir gok cisminin dogus/batis/gecis anini arar.
-// starname bos degilse hesap sabit yildiz icin yapilir.
-// Cisim aranan aralikta hic dogmuyor/batmiyorsa found=false doner.
+// RiseTrans searches for the next rise, set or meridian transit of a body.
+// When starname is non-empty the search is performed for that fixed star.
+// It reports found=false when the body never rises or sets in the search
+// window, which happens at polar latitudes.
 func RiseTrans(tjdUT float64, ipl int, starname string, epheflag, rsmi int32,
 	geolon, geolat, geoalt, atpress, attemp float64) (jd float64, found bool, err error) {
 
@@ -288,13 +292,12 @@ func RiseTrans(tjdUT float64, ipl int, starname string, epheflag, rsmi int32,
 	case rc == C.ERR:
 		return 0, false, errFrom(buf)
 	case rc == -2:
-		// Cisim kutup bolgesinde hic dogmuyor/batmiyor.
 		return 0, false, nil
 	}
 	return float64(tret), true, nil
 }
 
-// NodesApsides, bir gezegenin dugum ve apsis noktalaridir.
+// NodesApsides holds the nodes and apsides of a planetary orbit.
 type NodesApsides struct {
 	AscendingNode  CalcResult `json:"ascending_node"`
 	DescendingNode CalcResult `json:"descending_node"`
@@ -302,7 +305,7 @@ type NodesApsides struct {
 	Aphelion       CalcResult `json:"aphelion"`
 }
 
-// NodApsUT, gezegenin dugum ve apsis noktalarini hesaplar.
+// NodApsUT computes the nodes and apsides of a planet.
 func NodApsUT(tjdUT float64, ipl int, iflag, method int32) (NodesApsides, error) {
 	var asc, desc, peri, aphe [6]C.double
 	buf, free := newErrBuf()
@@ -326,8 +329,8 @@ func NodApsUT(tjdUT float64, ipl int, iflag, method int32) (NodesApsides, error)
 	}, nil
 }
 
-// FixStarUT, sabit yildizin konumunu hesaplar. Donen ad, kutuphanenin
-// normallestirdigi tam yildiz adidir.
+// FixStarUT computes the position of a fixed star. The returned name is the
+// full star name as the library normalised it.
 func FixStarUT(star string, tjdUT float64, iflag int32) (name string, res CalcResult, err error) {
 	cStar := (*C.char)(C.calloc(maxStarName, 1))
 	defer C.free(unsafe.Pointer(cStar))

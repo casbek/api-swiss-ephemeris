@@ -1,10 +1,10 @@
-# Derlenmis ciktilar
+# Build output
 /bin/
 /dist/
 *.exe
 *.test
 
-# Ortam dosyalari (ornegi .env.example olarak tutulur)
+# Environment files; the template is kept as .env.example
 .env
 
 # Go

@@ -9,17 +9,17 @@ import (
 	"github.com/casbek/api-swiss-ephemeris/internal/libswe"
 )
 
-// refJD, 15.06.1990 14:30:00 UT anina karsilik gelen Julian Day degeridir.
+// refJD is the Julian Day for 1990-06-15 14:30:00 UT.
 const refJD = 2448058.104166667
 
-// Referans degerler, Swiss Ephemeris 2.10.03 ile birlikte gelen swetest
-// araciyla uretilmistir:
+// The reference values below were produced with swetest, the command line tool
+// shipped with Swiss Ephemeris 2.10.03:
 //
 //	swetest -edir<ephe> -b15.06.1990 -ut14:30 -p0123456789 -fPls -eswe
 //
-// Bu sayede kendi cgo sarmalayicimizin kutuphaneyi dogru cagirdigi,
-// ephemeris dosyalarinin gercekten okundugu (Moshier'e dusulmedigi) ve
-// bayraklarin beklendigi gibi uygulandigi dogrulanir.
+// Comparing against it proves that our cgo bindings call the library
+// correctly, that the ephemeris files are really being read rather than
+// falling back to Moshier, and that the flags are applied as intended.
 var refPlanets = map[int]float64{
 	libswe.Sun:     84.2290447,
 	libswe.Moon:    346.7518340,
@@ -33,8 +33,8 @@ var refPlanets = map[int]float64{
 	libswe.Pluto:   225.3994063,
 }
 
-// refCusps, ayni an ve Istanbul (28.9784 D, 41.0082 K) icin Placidus
-// ev baslangiclaridir. Indis 1..12.
+// refCusps holds the Placidus house cusps for the same moment at Istanbul
+// (28.9784 E, 41.0082 N), at indices 1..12.
 var refCusps = [13]float64{
 	0,
 	227.1761062, 256.9296887, 291.5988665, 327.9146197,
@@ -46,7 +46,7 @@ const (
 	refAsc  = 227.1761062
 	refMC   = 147.9146197
 	refARMC = 150.0926041
-	// tolerance, swetest'in yazdirdigi 7 ondalik basamaga karsilik gelir.
+	// tolerance matches the seven decimal places swetest prints.
 	tolerance = 1e-6
 )
 
@@ -54,7 +54,7 @@ func newTestCalculator(t *testing.T) *Calculator {
 	t.Helper()
 	c, err := New(Config{EphePath: "../../ephe"})
 	if err != nil {
-		t.Fatalf("hesaplayici baslatilamadi: %v", err)
+		t.Fatalf("could not start calculator: %v", err)
 	}
 	t.Cleanup(c.Close)
 	return c
@@ -63,12 +63,12 @@ func newTestCalculator(t *testing.T) *Calculator {
 func TestVersion(t *testing.T) {
 	c := newTestCalculator(t)
 	if got := c.Version(); got != "2.10.03" {
-		t.Errorf("Version() = %q, beklenen 2.10.03", got)
+		t.Errorf("Version() = %q, want 2.10.03", got)
 	}
 }
 
-// TestPlanetPositionsMatchSwetest, gezegen boylamlarinin referans araciyla
-// birebir ortustugunu dogrular.
+// TestPlanetPositionsMatchSwetest checks the planetary longitudes against the
+// reference tool.
 func TestPlanetPositionsMatchSwetest(t *testing.T) {
 	c := newTestCalculator(t)
 
@@ -79,25 +79,26 @@ func TestPlanetPositionsMatchSwetest(t *testing.T) {
 				return err
 			}
 			if res.Warning != "" {
-				// En sik uyari, .se1 dosyasi bulunamayip Moshier'e
-				// dusuldugudur; bu sessizce hassasiyet kaybettirir.
-				t.Errorf("%s: beklenmeyen uyari: %s", libswe.PlanetName(ipl), res.Warning)
+				// The most common warning is that a .se1 file was not
+				// found and Moshier was used instead, which silently
+				// costs precision.
+				t.Errorf("%s: unexpected warning: %s", libswe.PlanetName(ipl), res.Warning)
 			}
 			if diff := math.Abs(res.Longitude - want); diff > tolerance {
-				t.Errorf("%s boylam = %.7f, beklenen %.7f (fark %.2e)",
+				t.Errorf("%s longitude = %.7f, want %.7f (off by %.2e)",
 					libswe.PlanetName(ipl), res.Longitude, want, diff)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("hesap basarisiz: %v", err)
+		t.Fatalf("calculation failed: %v", err)
 	}
 }
 
-// TestSpeedFlagDetectsRetrograde, SEFLG_SPEED'in gercekten uygulandigini
-// ve retrograd tespitinin calistigini dogrular. Bu tarihte Saturn, Uranus,
-// Neptune ve Pluto geri harekettedir.
+// TestSpeedFlagDetectsRetrograde checks that SEFLG_SPEED is really applied and
+// that retrograde motion is detected. On this date Saturn, Uranus, Neptune and
+// Pluto are retrograde.
 func TestSpeedFlagDetectsRetrograde(t *testing.T) {
 	c := newTestCalculator(t)
 
@@ -114,14 +115,14 @@ func TestSpeedFlagDetectsRetrograde(t *testing.T) {
 				return err
 			}
 			if got := res.SpeedLong < 0; got != want {
-				t.Errorf("%s retrograd = %v (hiz %.6f), beklenen %v",
+				t.Errorf("%s retrograde = %v (speed %.6f), want %v",
 					libswe.PlanetName(ipl), got, res.SpeedLong, want)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("hesap basarisiz: %v", err)
+		t.Fatalf("calculation failed: %v", err)
 	}
 }
 
@@ -135,27 +136,27 @@ func TestHousesPlacidus(t *testing.T) {
 		}
 		for i := 1; i <= 12; i++ {
 			if diff := math.Abs(h.Cusps[i] - refCusps[i]); diff > tolerance {
-				t.Errorf("ev %d = %.7f, beklenen %.7f", i, h.Cusps[i], refCusps[i])
+				t.Errorf("house %d = %.7f, want %.7f", i, h.Cusps[i], refCusps[i])
 			}
 		}
 		if diff := math.Abs(h.ASCMC[0] - refAsc); diff > tolerance {
-			t.Errorf("Ascendant = %.7f, beklenen %.7f", h.ASCMC[0], refAsc)
+			t.Errorf("Ascendant = %.7f, want %.7f", h.ASCMC[0], refAsc)
 		}
 		if diff := math.Abs(h.ASCMC[1] - refMC); diff > tolerance {
-			t.Errorf("MC = %.7f, beklenen %.7f", h.ASCMC[1], refMC)
+			t.Errorf("MC = %.7f, want %.7f", h.ASCMC[1], refMC)
 		}
 		if diff := math.Abs(h.ASCMC[2] - refARMC); diff > tolerance {
-			t.Errorf("ARMC = %.7f, beklenen %.7f", h.ASCMC[2], refARMC)
+			t.Errorf("ARMC = %.7f, want %.7f", h.ASCMC[2], refARMC)
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("ev hesabi basarisiz: %v", err)
+		t.Fatalf("house calculation failed: %v", err)
 	}
 }
 
-// TestSiderealDiffersFromTropical, sidereal modun gercekten devreye
-// girdigini ve farkin ayanamsa kadar oldugunu dogrular.
+// TestSiderealDiffersFromTropical checks that sidereal mode takes effect and
+// that the difference equals the ayanamsha.
 func TestSiderealDiffersFromTropical(t *testing.T) {
 	c := newTestCalculator(t)
 
@@ -164,39 +165,39 @@ func TestSiderealDiffersFromTropical(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		sidOpts := Options{Sidereal: true, Ayanamsa: libswe.SidmLahiri}
+		sidOpts := Options{Sidereal: true, Ayanamsha: libswe.SidmLahiri}
 		sid, err := s.Calc(refJD, libswe.Sun, sidOpts)
 		if err != nil {
 			return err
 		}
-		ayan, err := s.Ayanamsa(refJD, sidOpts)
+		ayan, err := s.Ayanamsha(refJD, sidOpts)
 		if err != nil {
 			return err
 		}
-		// 1990'da Lahiri ayanamsasi yaklasik 23.7 derecedir.
+		// The Lahiri ayanamsha is about 23.7 degrees in 1990.
 		if ayan < 23 || ayan > 24.5 {
-			t.Errorf("Lahiri ayanamsa = %.4f, 23-24.5 araliginda beklenirdi", ayan)
+			t.Errorf("Lahiri ayanamsha = %.4f, want between 23 and 24.5", ayan)
 		}
 		got := math.Mod(trop.Longitude-sid.Longitude+360, 360)
 		if diff := math.Abs(got - ayan); diff > 1e-6 {
-			t.Errorf("tropikal-sidereal farki = %.7f, ayanamsa %.7f", got, ayan)
+			t.Errorf("tropical minus sidereal = %.7f, ayanamsha is %.7f", got, ayan)
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("sidereal hesap basarisiz: %v", err)
+		t.Fatalf("sidereal calculation failed: %v", err)
 	}
 }
 
-// TestOptionsDoNotLeakBetweenCalls, worker thread'lerinin istekler arasinda
-// yeniden kullanilmasinin durum sizdirmadigini dogrular. Once sidereal bir
-// hesap yapilir, ardindan tropikal hesabin referans degeri vermesi beklenir.
+// TestOptionsDoNotLeakBetweenCalls checks that reusing a worker thread does not
+// carry settings over. A sidereal and a topocentric call run first, then a
+// plain tropical call must still return the reference value.
 func TestOptionsDoNotLeakBetweenCalls(t *testing.T) {
 	c := newTestCalculator(t)
 
 	err := c.Do(context.Background(), func(s *Session) error {
 		if _, err := s.Calc(refJD, libswe.Sun, Options{
-			Sidereal: true, Ayanamsa: libswe.SidmKrishnamurti,
+			Sidereal: true, Ayanamsha: libswe.SidmKrishnamurti,
 		}); err != nil {
 			return err
 		}
@@ -210,18 +211,18 @@ func TestOptionsDoNotLeakBetweenCalls(t *testing.T) {
 			return err
 		}
 		if diff := math.Abs(res.Longitude - refPlanets[libswe.Sun]); diff > tolerance {
-			t.Errorf("onceki istegin ayarlari sizdi: Gunes = %.7f, beklenen %.7f",
+			t.Errorf("settings leaked from an earlier call: Sun = %.7f, want %.7f",
 				res.Longitude, refPlanets[libswe.Sun])
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("hesap basarisiz: %v", err)
+		t.Fatalf("calculation failed: %v", err)
 	}
 }
 
-// TestConcurrentCalls, es zamanli isteklerin ayni sonucu urettigini dogrular.
-// -race ile calistirildiginda ayrica veri yarisi olmadigini gosterir.
+// TestConcurrentCalls checks that concurrent requests return the same result.
+// Run with -race it also shows there is no data race.
 func TestConcurrentCalls(t *testing.T) {
 	c := newTestCalculator(t)
 
@@ -239,7 +240,7 @@ func TestConcurrentCalls(t *testing.T) {
 					return err
 				}
 				if diff := math.Abs(res.Longitude - refPlanets[libswe.Sun]); diff > tolerance {
-					t.Errorf("es zamanli hesap sapti: %.7f", res.Longitude)
+					t.Errorf("concurrent calculation drifted: %.7f", res.Longitude)
 				}
 				return nil
 			})
@@ -251,12 +252,12 @@ func TestConcurrentCalls(t *testing.T) {
 	wg.Wait()
 	close(errs)
 	for err := range errs {
-		t.Errorf("es zamanli hesap hatasi: %v", err)
+		t.Errorf("concurrent calculation failed: %v", err)
 	}
 }
 
-// TestSessionEscapePanics, Session'in Do disinda kullanilmasinin sessizce
-// yanlis sonuc uretmek yerine hemen fark edilmesini dogrular.
+// TestSessionEscapePanics checks that using a Session outside Do fails loudly
+// instead of quietly computing on the wrong thread.
 func TestSessionEscapePanics(t *testing.T) {
 	c := newTestCalculator(t)
 
@@ -265,41 +266,41 @@ func TestSessionEscapePanics(t *testing.T) {
 		escaped = s
 		return nil
 	}); err != nil {
-		t.Fatalf("Do basarisiz: %v", err)
+		t.Fatalf("Do failed: %v", err)
 	}
 
 	defer func() {
 		if recover() == nil {
-			t.Error("kacirilan Session kullaniminda panic bekleniyordu")
+			t.Error("using an escaped Session should panic")
 		}
 	}()
 	_, _ = escaped.Calc(refJD, libswe.Sun, Options{})
 }
 
 func TestMissingEphePathFails(t *testing.T) {
-	if _, err := New(Config{EphePath: "../../ephe-yok"}); err == nil {
-		t.Error("olmayan ephemeris dizini icin hata bekleniyordu")
+	if _, err := New(Config{EphePath: "../../ephe-does-not-exist"}); err == nil {
+		t.Error("a missing ephemeris directory should be an error")
 	}
 }
 
 func TestUTCToJD(t *testing.T) {
 	_, ut, err := UTCToJD(1990, 6, 15, 14, 30, 0)
 	if err != nil {
-		t.Fatalf("UTCToJD basarisiz: %v", err)
+		t.Fatalf("UTCToJD failed: %v", err)
 	}
-	// swe_utc_to_jd artik saniyeleri hesaba kattigi icin sonuc, ham
-	// swe_julday degerinden birkac saniye farklidir.
+	// swe_utc_to_jd accounts for leap seconds, so the result differs from a
+	// plain swe_julday value by a few seconds.
 	if diff := math.Abs(ut - refJD); diff > 1e-4 {
-		t.Errorf("UT = %.9f, referans %.9f (fark %.2e gun)", ut, refJD, diff)
+		t.Errorf("UT = %.9f, reference %.9f (off by %.2e days)", ut, refJD, diff)
 	}
 }
 
-// BenchmarkNatalChart, tam bir natal harita hesabinin maliyetini olcer:
-// 10 gezegen + 12 ev + aciklar icin gereken temel Swiss Ephemeris cagrilari.
+// BenchmarkNatalChart measures a full natal chart: the calls needed for ten
+// bodies plus the twelve house cusps.
 func BenchmarkNatalChart(b *testing.B) {
 	c, err := New(Config{EphePath: "../../ephe"})
 	if err != nil {
-		b.Fatalf("hesaplayici baslatilamadi: %v", err)
+		b.Fatalf("could not start calculator: %v", err)
 	}
 	defer c.Close()
 
@@ -320,16 +321,16 @@ func BenchmarkNatalChart(b *testing.B) {
 			return err
 		})
 		if err != nil {
-			b.Fatalf("hesap basarisiz: %v", err)
+			b.Fatalf("calculation failed: %v", err)
 		}
 	}
 }
 
-// BenchmarkNatalChartParallel, es zamanli istek yuku altindaki davranisi olcer.
+// BenchmarkNatalChartParallel measures the same work under concurrent load.
 func BenchmarkNatalChartParallel(b *testing.B) {
 	c, err := New(Config{EphePath: "../../ephe"})
 	if err != nil {
-		b.Fatalf("hesaplayici baslatilamadi: %v", err)
+		b.Fatalf("could not start calculator: %v", err)
 	}
 	defer c.Close()
 
@@ -351,7 +352,7 @@ func BenchmarkNatalChartParallel(b *testing.B) {
 				return err
 			})
 			if err != nil {
-				b.Fatalf("hesap basarisiz: %v", err)
+				b.Fatalf("calculation failed: %v", err)
 			}
 		}
 	})

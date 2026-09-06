@@ -5,13 +5,13 @@ package libswe
 */
 import "C"
 
-// Takvim bayraklari.
+// Calendar flags.
 const (
 	JulCal  = C.SE_JUL_CAL
 	GregCal = C.SE_GREG_CAL
 )
 
-// Gok cisimleri (swe_calc_ut icin ipl degerleri).
+// Celestial bodies, the ipl values accepted by CalcUT.
 const (
 	EclNut = C.SE_ECL_NUT
 
@@ -26,10 +26,10 @@ const (
 	Neptune = C.SE_NEPTUNE
 	Pluto   = C.SE_PLUTO
 
-	MeanNode = C.SE_MEAN_NODE // Ortalama Ay dugumu
-	TrueNode = C.SE_TRUE_NODE // Gercek Ay dugumu
-	MeanApog = C.SE_MEAN_APOG // Ortalama Lilith (Kara Ay)
-	OscuApog = C.SE_OSCU_APOG // Oskulatif Lilith
+	MeanNode = C.SE_MEAN_NODE // mean lunar node
+	TrueNode = C.SE_TRUE_NODE // true lunar node
+	MeanApog = C.SE_MEAN_APOG // mean lunar apogee, the black moon Lilith
+	OscuApog = C.SE_OSCU_APOG // osculating lunar apogee
 	Earth    = C.SE_EARTH
 	Chiron   = C.SE_CHIRON
 	Pholus   = C.SE_PHOLUS
@@ -40,37 +40,38 @@ const (
 	IntpApog = C.SE_INTP_APOG
 	IntpPerg = C.SE_INTP_PERG
 
-	// AstOffset, asteroid numarasina eklenerek ipl degeri uretilir.
-	// Ornek: 433 numarali Eros icin AstOffset + 433.
+	// AstOffset is added to an asteroid number to form its ipl value, so
+	// asteroid 433 Eros is AstOffset + 433.
 	AstOffset = C.SE_AST_OFFSET
 )
 
-// Hesaplama bayraklari (iflag).
+// Calculation flags, combined into the iflag argument.
 const (
 	FlagJPLEph = C.SEFLG_JPLEPH
-	FlagSwieph = C.SEFLG_SWIEPH // Swiss Ephemeris dosyalari (varsayilan)
-	FlagMoseph = C.SEFLG_MOSEPH // Moshier: dosya gerektirmez, daha az hassas
+	FlagSwieph = C.SEFLG_SWIEPH // Swiss Ephemeris data files, the default
+	FlagMoseph = C.SEFLG_MOSEPH // Moshier: needs no data files, less precise
 
-	FlagHelctr  = C.SEFLG_HELCTR  // Heliosentrik
-	FlagTruePos = C.SEFLG_TRUEPOS // Gercek (geometrik) konum
+	FlagHelctr  = C.SEFLG_HELCTR  // heliocentric
+	FlagTruePos = C.SEFLG_TRUEPOS // true geometric position
 	FlagJ2000   = C.SEFLG_J2000
 	FlagNoNut   = C.SEFLG_NONUT
-	FlagSpeed   = C.SEFLG_SPEED // Yuksek hassasiyetli hiz (retro tespiti icin)
+	FlagSpeed   = C.SEFLG_SPEED // high precision speed, needed to detect retrogrades
 
 	FlagNoGDefl = C.SEFLG_NOGDEFL
 	FlagNoAberr = C.SEFLG_NOABERR
 
-	FlagEquatorial = C.SEFLG_EQUATORIAL // Sag acilim / deklinasyon
+	FlagEquatorial = C.SEFLG_EQUATORIAL // right ascension and declination
 	FlagXYZ        = C.SEFLG_XYZ
 	FlagRadians    = C.SEFLG_RADIANS
 	FlagBaryctr    = C.SEFLG_BARYCTR
-	FlagTopoctr    = C.SEFLG_TOPOCTR // Topocentrik (gozlemci merkezli)
+	FlagTopoctr    = C.SEFLG_TOPOCTR // topocentric, seen from the observer
 
-	FlagTropical = C.SEFLG_TROPICAL // 0: varsayilan
-	FlagSidereal = C.SEFLG_SIDEREAL // Vedik zodyak
+	FlagTropical = C.SEFLG_TROPICAL // zero, the default
+	FlagSidereal = C.SEFLG_SIDEREAL // sidereal zodiac
 )
 
-// Ayanamsa (sidereal mod) secenekleri. Vedik astrolojide en yaygini Lahiri'dir.
+// Ayanamshas available in sidereal mode. Lahiri is the most widely used in
+// Vedic astrology.
 const (
 	SidmFaganBradley = C.SE_SIDM_FAGAN_BRADLEY
 	SidmLahiri       = C.SE_SIDM_LAHIRI
@@ -86,18 +87,18 @@ const (
 	SidmUser         = C.SE_SIDM_USER
 )
 
-// swe_rise_trans icin arama bayraklari.
+// Search flags for RiseTrans.
 const (
 	CalcRise      = C.SE_CALC_RISE
 	CalcSet       = C.SE_CALC_SET
-	CalcMTransit  = C.SE_CALC_MTRANSIT // Ust gecis (meridyen)
-	CalcITransit  = C.SE_CALC_ITRANSIT // Alt gecis
+	CalcMTransit  = C.SE_CALC_MTRANSIT // upper meridian transit
+	CalcITransit  = C.SE_CALC_ITRANSIT // lower meridian transit
 	BitDiscCenter = C.SE_BIT_DISC_CENTER
 	BitNoRefract  = C.SE_BIT_NO_REFRACTION
 	BitHinduRise  = C.SE_BIT_HINDU_RISING
 )
 
-// swe_nod_aps_ut icin yontem bayraklari.
+// Method flags for NodApsUT.
 const (
 	NodbitMean     = C.SE_NODBIT_MEAN
 	NodbitOscu     = C.SE_NODBIT_OSCU

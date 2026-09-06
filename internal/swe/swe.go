@@ -1,5 +1,5 @@
-// Package swe, Swiss Ephemeris'i es zamanli kullanima uygun hale getiren
-// guvenli sarmalayicidir. Ham cgo cagrilari icin internal/libswe'ye bakin.
+// Package swe wraps Swiss Ephemeris so it can be used safely from concurrent
+// code. For the raw cgo calls see internal/libswe.
 package swe
 
 import (
@@ -11,31 +11,31 @@ import (
 	"github.com/casbek/api-swiss-ephemeris/internal/libswe"
 )
 
-// Config, hesaplayicinin kurulum ayarlaridir.
+// Config holds the settings a Calculator is built from.
 type Config struct {
-	// EphePath, .se1 ephemeris dosyalarinin bulundugu dizindir.
+	// EphePath is the directory holding the .se1 ephemeris files.
 	EphePath string
 
-	// Workers, ayrilacak OS thread sayisidir. 0 verilirse 1 kullanilir.
-	// Windows'ta 1'den buyuk olamaz; bkz. newPool.
+	// Workers is the number of OS threads to reserve. Zero means one. It
+	// cannot exceed one on Windows; see newPool.
 	Workers int
 }
 
-// Calculator, Swiss Ephemeris'e es zamanli guvenli erisim saglar.
-// Tum metodlari birden fazla goroutine'den cagrilabilir.
+// Calculator provides concurrency-safe access to Swiss Ephemeris. All of its
+// methods may be called from multiple goroutines.
 type Calculator struct {
 	p       *pool
 	version string
 }
 
-// New, ephemeris dizinini dogrular ve hesaplayiciyi baslatir.
+// New validates the ephemeris directory and starts the calculator.
 func New(cfg Config) (*Calculator, error) {
 	if cfg.EphePath == "" {
-		return nil, fmt.Errorf("swe: EphePath bos olamaz")
+		return nil, fmt.Errorf("swe: EphePath must not be empty")
 	}
 	abs, err := filepath.Abs(cfg.EphePath)
 	if err != nil {
-		return nil, fmt.Errorf("swe: ephemeris yolu cozulemedi: %w", err)
+		return nil, fmt.Errorf("swe: could not resolve ephemeris path: %w", err)
 	}
 	if err := checkEpheDir(abs); err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func New(cfg Config) (*Calculator, error) {
 	}
 
 	c := &Calculator{p: p}
-	// Surumu bir kez okuyup sakla; her istekte thread'e gitmeye gerek yok.
+	// Read the version once so later calls need not enter a worker thread.
 	if err := p.do(context.Background(), func() {
 		c.version = libswe.Version()
 	}); err != nil {
@@ -57,39 +57,42 @@ func New(cfg Config) (*Calculator, error) {
 	return c, nil
 }
 
-// checkEpheDir, dizinin var oldugunu ve en az bir .se1 dosyasi
-// icerdigini dogrular. Dosyalar eksikse Swiss Ephemeris sessizce
-// Moshier'e duser ve sonuclar beklenenden az hassas olur; bunu
-// baslangicta yakalamak calisma aninda tespit etmekten iyidir.
+// checkEpheDir verifies that the directory exists and holds at least one .se1
+// file.
+//
+// When the data files are missing Swiss Ephemeris silently falls back to the
+// Moshier ephemeris and every result loses precision without raising an error.
+// Catching that at startup is far better than discovering it in production.
 func checkEpheDir(dir string) error {
 	info, err := os.Stat(dir)
 	if err != nil {
-		return fmt.Errorf("swe: ephemeris dizini acilamadi (%s): %w", dir, err)
+		return fmt.Errorf("swe: could not open ephemeris directory %s: %w", dir, err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("swe: ephemeris yolu bir dizin degil: %s", dir)
+		return fmt.Errorf("swe: ephemeris path is not a directory: %s", dir)
 	}
 	matches, err := filepath.Glob(filepath.Join(dir, "*.se1"))
 	if err != nil {
-		return fmt.Errorf("swe: ephemeris dizini taranamadi: %w", err)
+		return fmt.Errorf("swe: could not scan ephemeris directory: %w", err)
 	}
 	if len(matches) == 0 {
-		return fmt.Errorf("swe: %s icinde .se1 dosyasi yok; sepl_18.se1, semo_18.se1 ve seas_18.se1 gerekli", dir)
+		return fmt.Errorf("swe: no .se1 files in %s; sepl_18.se1, semo_18.se1 and seas_18.se1 are required", dir)
 	}
 	return nil
 }
 
-// Version, kullanilan Swiss Ephemeris surumunu dondurur.
+// Version reports the Swiss Ephemeris version in use.
 func (c *Calculator) Version() string { return c.version }
 
-// Close, worker thread'lerini durdurur ve ephemeris dosyalarini kapatir.
+// Close stops the worker threads and releases the ephemeris files.
 func (c *Calculator) Close() { c.p.close() }
 
-// Do, fn'i Swiss Ephemeris'e ait bir thread uzerinde calistirir.
-// Bir haritanin tum hesaplari tek bir Do cagrisinda yapilmalidir: boylece
-// hepsi ayni thread uzerinde, tek seferde ve tutarli sekilde uretilir.
+// Do runs fn on a thread owned by Swiss Ephemeris.
 //
-// Verilen Session yalnizca fn suresince gecerlidir; disari kacirilmamalidir.
+// Compute a whole chart inside a single Do call, so that every value comes
+// from one consistent pass on one thread.
+//
+// The Session is only valid for the duration of fn and must not escape it.
 func (c *Calculator) Do(ctx context.Context, fn func(s *Session) error) error {
 	var inner error
 	s := &Session{}
@@ -103,46 +106,47 @@ func (c *Calculator) Do(ctx context.Context, fn func(s *Session) error) error {
 	return inner
 }
 
-// Session, bir Swiss Ephemeris thread'i uzerindeki hesaplama oturumudur.
-// Yalnizca Calculator.Do icinden kullanilabilir.
+// Session is a calculation session bound to one Swiss Ephemeris thread. It can
+// only be used inside Calculator.Do.
 type Session struct {
 	valid bool
 }
 
-// Options, hesabin nasil yapilacagini belirler.
+// Options selects how a position is computed.
 type Options struct {
-	// Sidereal true ise Vedik (sidereal) zodyak kullanilir.
+	// Sidereal switches to the sidereal zodiac used in Vedic astrology.
 	Sidereal bool
-	// Ayanamsa, Sidereal true iken kullanilacak ayanamsa numarasidir
-	// (libswe.Sidm* sabitleri). Varsayilan Lahiri'dir.
-	Ayanamsa int32
+	// Ayanamsha selects the offset used when Sidereal is set; see the
+	// libswe.Sidm constants. Lahiri is the usual choice.
+	Ayanamsha int32
 
-	// Topocentric true ise konumlar gozlemci merkezli hesaplanir.
-	// Ay icin fark yaklasik 1 dereceye kadar cikabilir.
+	// Topocentric computes positions as seen from the observer rather than
+	// from the centre of the Earth. For the Moon the difference reaches
+	// about one degree.
 	Topocentric bool
 	Latitude    float64
 	Longitude   float64
 	AltitudeM   float64
 
-	// Heliocentric true ise Gunes merkezli konum hesaplanir.
+	// Heliocentric computes positions as seen from the Sun.
 	Heliocentric bool
 
-	// Equatorial true ise ekliptik yerine ekvatoral koordinat
-	// (sag acilim / deklinasyon) doner.
+	// Equatorial returns right ascension and declination instead of
+	// ecliptic coordinates.
 	Equatorial bool
 
-	// TruePositions true ise isik zamani duzeltmesi yapilmamis
-	// gercek geometrik konum doner.
+	// TruePositions returns the true geometric position, without the
+	// correction for light travel time.
 	TruePositions bool
 
-	// NoNutation true ise nutasyon uygulanmaz (ortalama ekinoks).
+	// NoNutation leaves out nutation, giving the mean equinox of date.
 	NoNutation bool
 }
 
-// Flags, secenekleri Swiss Ephemeris iflag degerine cevirir.
+// Flags translates the options into a Swiss Ephemeris iflag value.
 func (o Options) Flags() int32 {
-	// SEFLG_SPEED her zaman aciktir: retrograd tespiti hiz degerine dayanir
-	// ve maliyeti ihmal edilebilir.
+	// SEFLG_SPEED is always on: retrograde detection depends on the speed
+	// and the extra cost is negligible.
 	f := int32(libswe.FlagSwieph | libswe.FlagSpeed)
 	if o.Sidereal {
 		f |= libswe.FlagSidereal
@@ -165,21 +169,20 @@ func (o Options) Flags() int32 {
 	return f
 }
 
-// apply, thread'e ait ayarlari bu istek icin gecerli hale getirir ve
-// kullanilacak iflag degerini dondurur.
+// apply writes the per-request thread state and returns the iflag to use.
 //
-// Worker thread'leri istekler arasinda yeniden kullanildigi icin bu ayarlar
-// HER hesaptan once yazilmalidir; aksi halde onceki istegin ayanamsasi veya
-// gozlemci konumu bir sonrakine sizar.
+// These settings are written before every calculation rather than once, since
+// worker threads are reused across requests and one request's ayanamsha or
+// observer position would otherwise leak into the next.
 func (s *Session) apply(o Options) int32 {
 	if !s.valid {
-		panic("swe: Session, Calculator.Do disinda kullanildi")
+		panic("swe: Session used outside Calculator.Do")
 	}
 
-	ayan := o.Ayanamsa
+	ayan := o.Ayanamsha
 	if !o.Sidereal {
-		// Sidereal degilken de sifirla: thread'de kalan onceki deger
-		// ayanamsa sorgulayan cagrilari etkilemesin.
+		// Reset even in tropical mode, so a value left on the thread by an
+		// earlier request cannot affect calls that read the ayanamsha.
 		ayan = libswe.SidmFaganBradley
 	}
 	libswe.SetSidMode(ayan, 0, 0)
@@ -190,72 +193,73 @@ func (s *Session) apply(o Options) int32 {
 	return o.Flags()
 }
 
-// Calc, tjdUT aninda ipl numarali gok cisminin konumunu hesaplar.
+// Calc computes the position of body ipl at tjdUT.
 func (s *Session) Calc(tjdUT float64, ipl int, o Options) (libswe.CalcResult, error) {
 	iflag := s.apply(o)
 	res, err := libswe.CalcUT(tjdUT, ipl, iflag)
 	if err != nil {
-		return res, fmt.Errorf("swe: %s hesaplanamadi: %w", libswe.PlanetName(ipl), err)
+		return res, fmt.Errorf("swe: could not compute %s: %w", libswe.PlanetName(ipl), err)
 	}
 	return res, nil
 }
 
-// Houses, verilen an ve konum icin ev sistemini hesaplar.
+// Houses computes the house cusps for a moment and place.
 func (s *Session) Houses(tjdUT, lat, lon float64, hsys byte, o Options) (libswe.HousesResult, error) {
 	iflag := s.apply(o)
 	return libswe.HousesEx(tjdUT, iflag, lat, lon, hsys)
 }
 
-// HousePos, bir konumun kacinci evde oldugunu ondalikli olarak dondurur.
+// HousePos returns the house a position falls in, as a fraction.
 func (s *Session) HousePos(armc, lat, eps float64, hsys byte, lon, plat float64) (float64, error) {
 	return libswe.HousePos(armc, lat, eps, hsys, lon, plat)
 }
 
-// Ayanamsa, verilen an icin ayanamsa degerini derece olarak dondurur.
-func (s *Session) Ayanamsa(tjdUT float64, o Options) (float64, error) {
+// Ayanamsha returns the ayanamsha for the given moment, in degrees.
+func (s *Session) Ayanamsha(tjdUT float64, o Options) (float64, error) {
 	iflag := s.apply(o)
 	return libswe.GetAyanamsa(tjdUT, iflag)
 }
 
-// Pheno, gok cisminin faz ve parlaklik bilgilerini dondurur.
+// Pheno returns the phase and brightness of a body.
 func (s *Session) Pheno(tjdUT float64, ipl int, o Options) (libswe.Pheno, error) {
 	iflag := s.apply(o)
 	return libswe.PhenoUT(tjdUT, ipl, iflag)
 }
 
-// RiseTrans, dogus/batis/gecis anini arar. rsmi icin libswe.CalcRise gibi
-// sabitleri kullanin.
+// RiseTrans searches for a rise, set or transit. Pass one of the libswe.Calc
+// constants as rsmi.
 func (s *Session) RiseTrans(tjdUT float64, ipl int, rsmi int32, lat, lon, altM float64, o Options) (jd float64, found bool, err error) {
 	iflag := s.apply(o)
-	// atpress=0 verildiginde kutuphane basinci yukseklikten kendisi hesaplar.
+	// Passing zero for the pressure lets the library derive it from the
+	// altitude.
 	return libswe.RiseTrans(tjdUT, ipl, "", iflag, rsmi, lon, lat, altM, 0, 15)
 }
 
-// NodesApsides, gezegenin dugum ve apsis noktalarini dondurur.
+// NodesApsides returns the nodes and apsides of a planetary orbit.
 func (s *Session) NodesApsides(tjdUT float64, ipl int, method int32, o Options) (libswe.NodesApsides, error) {
 	iflag := s.apply(o)
 	return libswe.NodApsUT(tjdUT, ipl, iflag, method)
 }
 
-// FixStar, sabit yildizin konumunu hesaplar.
+// FixStar computes the position of a fixed star.
 func (s *Session) FixStar(name string, tjdUT float64, o Options) (string, libswe.CalcResult, error) {
 	iflag := s.apply(o)
 	return libswe.FixStarUT(name, tjdUT, iflag)
 }
 
-// DeltaT, verilen Julian Day icin delta T degerini gun cinsinden dondurur.
+// DeltaT returns delta T for the given Julian Day, in days.
 func (s *Session) DeltaT(jd float64) (float64, error) {
 	return libswe.DeltaT(jd, libswe.FlagSwieph)
 }
 
-// UTCToJD, UTC tarih/saatini Julian Day'e cevirir (artik saniyeler dahil).
-// Bu fonksiyon Swiss Ephemeris global durumuna dokunmaz, oturum disinda da
-// cagrilabilir; kolaylik olsun diye burada da sunulur.
+// UTCToJD converts a UTC date and time to a Julian Day, leap seconds included.
+// It does not touch Swiss Ephemeris global state, so it may be called outside
+// a session.
 func UTCToJD(year, month, day, hour, minute int, sec float64) (et, ut float64, err error) {
 	return libswe.UTCToJD(year, month, day, hour, minute, sec, libswe.GregCal)
 }
 
-// JDToUTC, UT1 Julian Day degerini UTC takvim degerlerine cevirir.
+// JDToUTC converts a UT1 Julian Day to UTC calendar values.
 func JDToUTC(jdUT float64) (year, month, day, hour, minute int, sec float64) {
 	return libswe.JDUT1ToUTC(jdUT, libswe.GregCal)
 }
