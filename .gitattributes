@@ -1,0 +1,6 @@
+# Kaynak dosyalar deponun icinde her zaman LF ile tutulur.
+# Dagitim hedefi Linux; CRLF derleme ve betiklerde sorun cikarir.
+* text=auto eol=lf
+
+# Ephemeris veri dosyalari ikili bicimdedir, hicbir donusum uygulanmamali.
+*.se1 binary

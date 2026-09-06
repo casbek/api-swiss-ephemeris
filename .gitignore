@@ -1,0 +1,12 @@
+# Derlenmis ciktilar
+/bin/
+/dist/
+*.exe
+*.test
+
+# Ortam dosyalari (ornegi .env.example olarak tutulur)
+.env
+
+# Go
+vendor/
+*.out
