@@ -373,3 +373,108 @@ func HousesARMC(armc, geolat, eps float64, hsys byte) (HousesResult, error) {
 	}
 	return res, nil
 }
+
+// EclipseFlags are the bits returned alongside an eclipse, describing its
+// kind.
+const (
+	EclCentral      = C.SE_ECL_CENTRAL
+	EclNoncentral   = C.SE_ECL_NONCENTRAL
+	EclTotal        = C.SE_ECL_TOTAL
+	EclAnnular      = C.SE_ECL_ANNULAR
+	EclPartial      = C.SE_ECL_PARTIAL
+	EclAnnularTotal = C.SE_ECL_ANNULAR_TOTAL
+	EclPenumbral    = C.SE_ECL_PENUMBRAL
+
+	EclAllSolar = C.SE_ECL_ALLTYPES_SOLAR
+	EclAllLunar = C.SE_ECL_ALLTYPES_LUNAR
+)
+
+// Eclipse is one eclipse, with the moments that define it.
+//
+// The meaning of each entry of Times depends on whether the eclipse is solar
+// or lunar; the callers in package astro name them.
+type Eclipse struct {
+	// Kind carries the SE_ECL bits describing the eclipse.
+	Kind int32
+	// Times holds the moments Swiss Ephemeris returns, in Julian Days.
+	Times [10]float64
+}
+
+// SolarEclipseWhenGlobal finds the next solar eclipse anywhere on Earth, at or
+// after tjdStart. Set backward to search into the past instead.
+func SolarEclipseWhenGlobal(tjdStart float64, iflag, ecltype int32, backward bool) (Eclipse, error) {
+	var tret [10]C.double
+	buf, free := newErrBuf()
+	defer free()
+
+	var back C.int32_t
+	if backward {
+		back = 1
+	}
+	rc := C.swe_sol_eclipse_when_glob(C.double(tjdStart), C.int32_t(iflag),
+		C.int32_t(ecltype), &tret[0], back, buf)
+	if rc == C.ERR {
+		return Eclipse{}, errFrom(buf)
+	}
+
+	e := Eclipse{Kind: int32(rc)}
+	for i := range tret {
+		e.Times[i] = float64(tret[i])
+	}
+	return e, nil
+}
+
+// LunarEclipseWhen finds the next lunar eclipse at or after tjdStart. A lunar
+// eclipse is visible from the whole night side at once, so it needs no place.
+func LunarEclipseWhen(tjdStart float64, iflag, ecltype int32, backward bool) (Eclipse, error) {
+	var tret [10]C.double
+	buf, free := newErrBuf()
+	defer free()
+
+	var back C.int32_t
+	if backward {
+		back = 1
+	}
+	rc := C.swe_lun_eclipse_when(C.double(tjdStart), C.int32_t(iflag),
+		C.int32_t(ecltype), &tret[0], back, buf)
+	if rc == C.ERR {
+		return Eclipse{}, errFrom(buf)
+	}
+
+	e := Eclipse{Kind: int32(rc)}
+	for i := range tret {
+		e.Times[i] = float64(tret[i])
+	}
+	return e, nil
+}
+
+// EclipseWhere is the place on Earth an eclipse is greatest, and how deep it
+// is there.
+type EclipseWhere struct {
+	Longitude float64
+	Latitude  float64
+	// Magnitude is the fraction of the Sun's diameter covered.
+	Magnitude float64
+	// Obscuration is the fraction of the Sun's disc covered.
+	Obscuration float64
+}
+
+// SolarEclipseWhere reports where on Earth a solar eclipse is greatest.
+func SolarEclipseWhere(tjdUT float64, iflag int32) (EclipseWhere, error) {
+	var geopos [20]C.double
+	var attr [20]C.double
+	buf, free := newErrBuf()
+	defer free()
+
+	rc := C.swe_sol_eclipse_where(C.double(tjdUT), C.int32_t(iflag),
+		&geopos[0], &attr[0], buf)
+	if rc < 0 {
+		return EclipseWhere{}, errFrom(buf)
+	}
+	return EclipseWhere{
+		Longitude:   float64(geopos[0]),
+		Latitude:    float64(geopos[1]),
+		Magnitude:   float64(attr[0]),
+		Obscuration: float64(attr[2]),
+	}, nil
+}

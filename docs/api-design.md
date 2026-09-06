@@ -198,11 +198,11 @@ request.
 | `/v1/composite` | POST | Midpoint composite chart |
 | `/v1/progressions` | POST | Secondary progressions and solar arc directions |
 | `/v1/returns` | POST | Solar and lunar returns |
-| `/v1/ephemeris` | GET | Daily positions across a date range |
-| `/v1/moon/phases` | GET | New, first quarter, full and last quarter moments |
-| `/v1/retrogrades` | GET | Retrograde stations and periods |
-| `/v1/eclipses` | GET | Solar and lunar eclipses |
-| `/v1/rise-set` | POST | Rise, set and meridian transit times |
+| `/v1/ephemeris` | POST | Positions at regular intervals across a span |
+| `/v1/moon/phases` | POST | New, first quarter, full and last quarter moons |
+| `/v1/retrogrades` | POST | Stretches of backward motion, with their stations |
+| `/v1/eclipses` | POST | Solar and lunar eclipses |
+| `/v1/rise-set` | POST | Rise, set and meridian crossings at a place |
 | `/v1/time` | POST | Resolve a local reading into an instant and a Julian Day |
 | `/v1/reference/{topic}` | GET | Supported bodies, house systems, ayanamshas, aspects |
 | `/v1/license` | GET | Licence terms and a link to the source |
@@ -363,6 +363,38 @@ The moment is a fact about the body and does not depend on where the chart is
 cast. `location` decides only the houses, and defaults to the birthplace;
 casting the return for wherever the person actually is at the time is the other
 common practice.
+
+## Searching a span
+
+`/v1/ephemeris`, `/v1/moon/phases`, `/v1/retrogrades` and `/v1/eclipses` all
+take a `from` and a `to`. They are `POST` rather than `GET` because the span,
+the bodies and the settings together are a structured object, not a handful of
+query parameters. At most fifty years may be searched at once, and an ephemeris
+returns at most a thousand rows.
+
+An ephemeris has no place, only moments, so it carries no houses: it is a table
+of where the bodies are, not of how they fall for anyone in particular.
+
+A moon phase is the angle between the Moon and the Sun reaching a quarter of
+the circle, and each is solved for directly, so the response can be checked
+against its own definition: at a new moon the two stand together, at a full
+moon opposite.
+
+A retrograde period runs between two stations, where the body's speed passes
+through zero. A period already under way when the span opens, or still running
+when it closes, is reported with the missing end absent rather than filled in
+with a date that was never searched for.
+
+Eclipses come from Swiss Ephemeris's own search. A solar eclipse also reports
+where on Earth it is deepest. Note that `magnitude` is the fraction of the
+Sun's **diameter** the Moon covers and passes one for a total eclipse, where
+the Moon is the larger disc, while `obscuration` is the fraction of the Sun's
+**disc** covered and never does.
+
+Rising and setting are per place and per day. Any of the four times can be
+absent: inside the polar circles a body can stay above or below the horizon for
+weeks, and then it neither rises nor sets, which the response says rather than
+inventing a time.
 
 ## House systems
 

@@ -272,3 +272,21 @@ func (s *Session) HousesFromARMC(armc, lat, eps float64, hsys byte) (libswe.Hous
 	}
 	return libswe.HousesARMC(armc, lat, eps, hsys)
 }
+
+// SolarEclipse finds the next solar eclipse anywhere on Earth.
+func (s *Session) SolarEclipse(tjdStart float64, ecltype int32, backward bool, o Options) (libswe.Eclipse, error) {
+	iflag := s.apply(o)
+	return libswe.SolarEclipseWhenGlobal(tjdStart, iflag, ecltype, backward)
+}
+
+// LunarEclipse finds the next lunar eclipse.
+func (s *Session) LunarEclipse(tjdStart float64, ecltype int32, backward bool, o Options) (libswe.Eclipse, error) {
+	iflag := s.apply(o)
+	return libswe.LunarEclipseWhen(tjdStart, iflag, ecltype, backward)
+}
+
+// SolarEclipseWhere reports where on Earth a solar eclipse is greatest.
+func (s *Session) SolarEclipseWhere(tjdUT float64, o Options) (libswe.EclipseWhere, error) {
+	iflag := s.apply(o)
+	return libswe.SolarEclipseWhere(tjdUT, iflag)
+}

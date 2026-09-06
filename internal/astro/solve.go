@@ -135,3 +135,62 @@ func refine(f longitudeFunc, target, guess, maxDays float64) (float64, bool, err
 
 // signsDiffer reports whether two values lie on opposite sides of zero.
 func signsDiffer(a, b float64) bool { return (a < 0) != (b < 0) }
+
+// scalarFunc reports a plain quantity that changes with time, such as a body's
+// speed.
+type scalarFunc func(jd float64) (float64, error)
+
+// zeroCrossing finds the first moment at or after start where f changes sign.
+//
+// Unlike crossing this is for a quantity that is not an angle, so there is no
+// wrapping to guard against: a sign change is always a sign change. A station
+// is exactly this, a body's speed passing through zero.
+func zeroCrossing(f scalarFunc, start, window, step float64) (float64, bool, error) {
+	prev, err := f(start)
+	if err != nil {
+		return 0, false, err
+	}
+
+	for t := start + step; t <= start+window+step; t += step {
+		if t > start+window {
+			t = start + window
+		}
+
+		v, err := f(t)
+		if err != nil {
+			return 0, false, err
+		}
+		if signsDiffer(prev, v) {
+			root, err := bisectScalar(f, t-step, t)
+			return root, true, err
+		}
+
+		prev = v
+		if t >= start+window {
+			break
+		}
+	}
+	return 0, false, nil
+}
+
+// bisectScalar closes in on a sign change known to lie between lo and hi.
+func bisectScalar(f scalarFunc, lo, hi float64) (float64, error) {
+	loVal, err := f(lo)
+	if err != nil {
+		return 0, err
+	}
+
+	for i := 0; i < maxBisections && hi-lo > solverTolerance; i++ {
+		mid := (lo + hi) / 2
+		midVal, err := f(mid)
+		if err != nil {
+			return 0, err
+		}
+		if signsDiffer(loVal, midVal) {
+			hi = mid
+		} else {
+			lo, loVal = mid, midVal
+		}
+	}
+	return (lo + hi) / 2, nil
+}

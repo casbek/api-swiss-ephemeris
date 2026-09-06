@@ -111,6 +111,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			{Path: "/v1/composite", Method: "POST", Description: "A relationship chart, by midpoint or Davison"},
 			{Path: "/v1/progressions", Method: "POST", Description: "A birth chart moved forward, by secondary progression or solar arc"},
 			{Path: "/v1/returns", Method: "POST", Description: "Solar and lunar return charts"},
+			{Path: "/v1/ephemeris", Method: "POST", Description: "Positions at regular intervals across a span"},
+			{Path: "/v1/moon/phases", Method: "POST", Description: "New, first quarter, full and last quarter moons"},
+			{Path: "/v1/retrogrades", Method: "POST", Description: "Stretches of backward motion, with their stations"},
+			{Path: "/v1/eclipses", Method: "POST", Description: "Solar and lunar eclipses"},
+			{Path: "/v1/rise-set", Method: "POST", Description: "Rise, set and meridian crossings at a place"},
 		},
 	}
 	writeCacheableJSON(w, r, resp, "public, max-age=300")
