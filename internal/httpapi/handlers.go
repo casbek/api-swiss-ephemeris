@@ -83,6 +83,17 @@ type endpoint struct {
 	Description string `json:"description"`
 }
 
+// indexEndpoints derives the index listing from routeTable, so a route can
+// never be wired up without also being discoverable.
+func indexEndpoints() []endpoint {
+	table := routeTable()
+	out := make([]endpoint, 0, len(table))
+	for _, rt := range table {
+		out = append(out, endpoint{Path: rt.Path, Method: rt.Method, Description: rt.Description})
+	}
+	return out
+}
+
 // handleIndex lists what the service offers, so a client can discover the API
 // without reading the documentation first.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +103,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		Ephemeris string       `json:"ephemeris"`
 		Source    string       `json:"source"`
 		License   string       `json:"license"`
+		OpenAPI   string       `json:"openapi"`
 		Endpoints []endpoint   `json:"endpoints"`
 	}{
 		Service:   "api-swiss-ephemeris",
@@ -99,24 +111,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		Ephemeris: "Swiss Ephemeris " + s.calc.Version(),
 		Source:    sourceURL,
 		License:   licenseID,
-		Endpoints: []endpoint{
-			{Path: "/health", Method: "GET", Description: "Liveness and readiness"},
-			{Path: "/v1", Method: "GET", Description: "This index"},
-			{Path: "/v1/license", Method: "GET", Description: "Licence terms and source location"},
-			{Path: "/v1/reference/{topic}", Method: "GET", Description: "Supported bodies, signs, house systems, aspects and ayanamshas"},
-			{Path: "/v1/time", Method: "POST", Description: "Resolve a local date and time into an instant and a Julian Day"},
-			{Path: "/v1/natal", Method: "POST", Description: "Cast a birth chart: bodies, houses, aspects and dignities"},
-			{Path: "/v1/transits", Method: "POST", Description: "The sky at a moment and its aspects to a birth chart"},
-			{Path: "/v1/synastry", Method: "POST", Description: "Aspects between two birth charts"},
-			{Path: "/v1/composite", Method: "POST", Description: "A relationship chart, by midpoint or Davison"},
-			{Path: "/v1/progressions", Method: "POST", Description: "A birth chart moved forward, by secondary progression or solar arc"},
-			{Path: "/v1/returns", Method: "POST", Description: "Solar and lunar return charts"},
-			{Path: "/v1/ephemeris", Method: "POST", Description: "Positions at regular intervals across a span"},
-			{Path: "/v1/moon/phases", Method: "POST", Description: "New, first quarter, full and last quarter moons"},
-			{Path: "/v1/retrogrades", Method: "POST", Description: "Stretches of backward motion, with their stations"},
-			{Path: "/v1/eclipses", Method: "POST", Description: "Solar and lunar eclipses"},
-			{Path: "/v1/rise-set", Method: "POST", Description: "Rise, set and meridian crossings at a place"},
-		},
+		OpenAPI:   openAPIPath,
+		Endpoints: indexEndpoints(),
 	}
 	writeCacheableJSON(w, r, resp, "public, max-age=300")
 }

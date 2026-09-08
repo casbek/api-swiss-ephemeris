@@ -1,10 +1,13 @@
 # api-swiss-ephemeris
 
+[![CI](https://github.com/casbek/api-swiss-ephemeris/actions/workflows/ci.yml/badge.svg)](https://github.com/casbek/api-swiss-ephemeris/actions/workflows/ci.yml)
+
 A high-precision astrology calculation API built on the
 [Swiss Ephemeris](https://www.astro.com/swisseph/) 2.10.03 library, written in Go.
 
-> **Status: early development.** The calculation core is complete and verified.
-> The HTTP API layer is in progress and endpoints are not stable yet.
+> **Status: pre-release.** The calculation core and the endpoints below are
+> complete and tested. The shapes are described in the OpenAPI document and are
+> not expected to change, but nothing is promised until 1.0.
 
 ## Why
 
@@ -24,6 +27,30 @@ The tests also assert that the `.se1` ephemeris files are actually being read.
 Swiss Ephemeris silently falls back to the lower precision Moshier ephemeris
 when its data files cannot be found, which is easy to miss and quietly degrades
 every result.
+
+## The API
+
+Twelve calculation endpoints: birth charts, transits, synastry, composites,
+progressions, returns, ephemeris tables, moon phases, retrograde periods,
+eclipses, rise and set times, and time zone resolution on its own. Five more
+cover health, discovery, the licence, the catalogue and this document.
+
+The contract is described in [`api/openapi.yaml`](api/openapi.yaml), and the
+running service serves its own copy at `/v1/openapi.yaml`, so a client always
+reads the contract of the version it is actually talking to. `GET /v1` lists
+every endpoint, and `/v1/reference/{topic}` publishes the catalogue of bodies,
+signs, house systems, aspects and ayanamshas the service supports.
+
+The document cannot fall behind the code: the route table is the single source
+for the mux, the index and the tests, and the tests fail if anything is served
+without being documented or documented without being served.
+
+```sh
+curl -s localhost:8080/v1/natal -H 'Content-Type: application/json' -d '{
+  "datetime": {"date": "1990-06-15", "time": "17:30:00", "timezone": "Europe/Istanbul"},
+  "location": {"latitude": 41.0082, "longitude": 28.9784}
+}'
+```
 
 ## Requirements
 
@@ -54,6 +81,10 @@ Ryzen 5 7600X, so calculation cost is negligible compared to HTTP overhead.
 | --- | --- |
 | `internal/libswe` | Vendored Swiss Ephemeris C sources and the raw cgo bindings |
 | `internal/swe` | Concurrency-safe wrapper: worker pool and the session API |
+| `internal/astro` | The astrological domain: catalogue, charts, aspects, dignities, event searches |
+| `internal/tz` | Turning a local reading into an instant, with its daylight saving history |
+| `internal/httpapi` | The HTTP layer: routes, middleware, error format |
+| `api` | The OpenAPI description, embedded in the binary |
 | `ephe` | Ephemeris data files covering 1800–2400 CE |
 
 ## Thread safety

@@ -6,7 +6,7 @@ LDFLAGS := -s -w -X $(PKG)/internal/version.Version=$(VERSION)
 # cgo is required: the Swiss Ephemeris sources are compiled into the binary.
 export CGO_ENABLED = 1
 
-.PHONY: all build run test race bench vet fmt check clean
+.PHONY: all build run test race bench vet fmt lint-openapi check clean
 
 all: check build
 
@@ -31,8 +31,11 @@ vet:
 fmt:
 	gofmt -w $(shell git ls-files '*.go')
 
+lint-openapi:
+	npx --yes @redocly/cli@latest lint api/openapi.yaml
+
 # Everything CI runs.
-check: vet test race
+check: vet test race lint-openapi
 
 clean:
 	rm -rf bin

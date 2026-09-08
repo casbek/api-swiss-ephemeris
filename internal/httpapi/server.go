@@ -21,6 +21,11 @@ import (
 // real traffic.
 const healthPath = "/health"
 
+// openAPIPath serves the machine-readable contract. Like the licence, it is
+// exempt from authentication: a client deciding whether to integrate has to be
+// able to read the contract before it has a key.
+const openAPIPath = "/v1/openapi.yaml"
+
 // Server holds everything the handlers need.
 type Server struct {
 	cfg    *config.Config
@@ -66,7 +71,7 @@ func New(cfg *config.Config, log *slog.Logger, calc *swe.Calculator) *Server {
 		MaxBody(cfg.MaxBodyBytes),
 	}
 	if cfg.AuthEnabled() {
-		mw = append(mw, APIKeyAuth(cfg.APIKeys, healthPath, "/v1/license"))
+		mw = append(mw, APIKeyAuth(cfg.APIKeys, healthPath, "/v1/license", openAPIPath))
 	}
 
 	s.http = &http.Server{
@@ -81,31 +86,11 @@ func New(cfg *config.Config, log *slog.Logger, calc *swe.Calculator) *Server {
 	return s
 }
 
-// routes registers every path the service answers.
+// routes registers every path in routeTable, the single source shared with
+// the /v1 index and the generated OpenAPI document.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET "+healthPath, s.handleHealth)
-	mux.HandleFunc("GET /v1", s.handleIndex)
-	mux.HandleFunc("GET /v1/license", s.handleLicense)
-	mux.HandleFunc("GET /v1/reference/{topic}", s.handleReference)
-	mux.HandleFunc("POST /v1/time", s.handleTime)
-	mux.HandleFunc("POST /v1/natal", s.handleNatal)
-	mux.HandleFunc("POST /v1/transits", s.handleTransits)
-	mux.HandleFunc("POST /v1/synastry", s.handleSynastry)
-	mux.HandleFunc("POST /v1/composite", s.handleComposite)
-	mux.HandleFunc("POST /v1/progressions", s.handleProgressions)
-	mux.HandleFunc("POST /v1/returns", s.handleReturns)
-	mux.HandleFunc("POST /v1/ephemeris", s.handleEphemeris)
-	mux.HandleFunc("POST /v1/moon/phases", s.handleMoonPhases)
-	mux.HandleFunc("POST /v1/retrogrades", s.handleRetrogrades)
-	mux.HandleFunc("POST /v1/eclipses", s.handleEclipses)
-	mux.HandleFunc("POST /v1/rise-set", s.handleRiseSet)
-
-	// Anything else is a 404 in problem+json rather than the plain text
-	// ServeMux would produce.
-	mux.HandleFunc("/", s.handleNotFound)
-
+	s.register(mux)
 	return mux
 }
 

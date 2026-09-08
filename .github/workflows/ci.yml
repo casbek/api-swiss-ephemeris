@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push makes an in-flight run for the same branch pointless.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Read the version from go.mod, so the toolchain cannot drift from
+          # what the module declares.
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        # cgo is required: the Swiss Ephemeris sources are compiled into the
+        # binary, so this also proves the vendored C still builds on a clean
+        # machine with the runner's compiler rather than only on a developer's.
+        env:
+          CGO_ENABLED: 1
+        run: go build -trimpath ./...
+
+      - name: Test with the race detector
+        env:
+          CGO_ENABLED: 1
+        run: go test ./... -count=1 -race
+
+      - name: Benchmark
+        # Not a performance gate, just a check that the benchmarks still run
+        # and that a chart is still computed in microseconds rather than
+        # milliseconds.
+        env:
+          CGO_ENABLED: 1
+        run: go test ./internal/swe -run='^$' -bench=. -benchtime=10x
+
+  openapi:
+    name: Lint the OpenAPI document
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      # The Go tests hold the document and the route table to each other, so
+      # nothing can be served without being documented. This checks the other
+      # half: that the document is a valid one.
+      - name: Lint
+        run: npx --yes @redocly/cli@latest lint api/openapi.yaml

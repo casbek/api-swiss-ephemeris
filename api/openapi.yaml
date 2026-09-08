@@ -1,0 +1,1594 @@
+openapi: 3.1.0
+
+info:
+  title: Swiss Ephemeris API
+  version: "1.0.0"
+  summary: High-precision astrological calculation over HTTP.
+  description: |
+    Positions, houses, aspects and timing, computed with Swiss Ephemeris 2.10.03.
+
+    The service performs calculation only. It never returns interpretation text:
+    that is content rather than computation, and it belongs to the application
+    that consumes this API.
+
+    ## Conventions
+
+    Angles are degrees as JSON numbers, with longitudes normalised to `[0, 360)`.
+    Enumerated values are lowercase strings rather than numeric codes, so a house
+    system is `"placidus"` and not `"P"`. Times are RFC 3339.
+
+    Every calculation response carries a `meta` block naming everything that
+    could change the result: the instant, the zone it came from, the zodiac, the
+    house system and the bodies asked for. When a result disagrees with another
+    service the difference is almost always one of those, and having them in the
+    response settles it.
+
+    ## Dates covered
+
+    The ephemeris files shipped with the service cover **1800 to 2399**. A date
+    outside that range is refused with a `422`, because Swiss Ephemeris does not
+    fail there: it falls back to a lower precision ephemeris and keeps answering,
+    which would mean quietly returning a worse chart.
+
+    ## Errors
+
+    Errors follow RFC 9457 and are served as `application/problem+json`. A
+    validation failure names the field it came from, so an error on the second
+    chart of a synastry reads `chart_b.datetime.timezone`.
+  license:
+    name: AGPL-3.0-or-later
+    identifier: AGPL-3.0-or-later
+  contact:
+    name: Source code
+    url: https://github.com/casbek/api-swiss-ephemeris
+
+externalDocs:
+  description: Design notes and the reasoning behind these shapes
+  url: https://github.com/casbek/api-swiss-ephemeris/blob/main/docs/api-design.md
+
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local development
+
+tags:
+  - name: service
+    description: Health, discovery and licence.
+  - name: charts
+    description: Casting a chart for a birth or a moment.
+  - name: comparison
+    description: Relating two charts to one another.
+  - name: time
+    description: Moving a chart through time, and resolving moments.
+  - name: sky
+    description: Searching a span of time for events.
+
+# Listing an empty requirement alongside the two schemes marks authentication
+# as optional: it is off entirely when a deployment configures no keys.
+security:
+  - ApiKeyHeader: []
+  - BearerToken: []
+  - {}
+
+paths:
+  /health:
+    get:
+      tags: [service]
+      operationId: getHealth
+      security: []
+      summary: Liveness and readiness
+      description: |
+        Reports whether the service can actually serve requests. It does not
+        merely answer that the process is up: it runs a real calculation, since
+        the failure worth catching is an ephemeris directory that has become
+        unreadable while the process kept running.
+
+        Answers `503` while draining during a graceful shutdown, so a load
+        balancer can take the instance out of rotation before it stops.
+      responses:
+        "200":
+          description: The service is ready.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        "503":
+          description: The service is degraded or draining.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /v1:
+    get:
+      tags: [service]
+      operationId: getIndex
+      summary: Index of the API
+      description: Lists what the service offers, so a client can discover it without reading the documentation first.
+      responses:
+        "200":
+          description: The endpoint listing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Index' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/openapi.yaml:
+    get:
+      tags: [service]
+      operationId: getOpenAPI
+      security: []
+      summary: This document
+      description: |
+        Serves the OpenAPI description of the running build, so a client always
+        reads the contract of the version it is actually talking to rather than
+        one published separately and possibly out of step.
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /v1/license:
+    get:
+      tags: [service]
+      operationId: getLicense
+      security: []
+      summary: Licence terms and source location
+      description: |
+        Section 13 of the AGPL entitles anyone interacting with this service over
+        a network to its source code. This endpoint carries that offer and is
+        exempt from authentication, so it stands even for a caller with no key.
+      responses:
+        "200":
+          description: The licence and where to obtain the source.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/License' }
+
+  /v1/reference/{topic}:
+    get:
+      tags: [service]
+      operationId: getReference
+      summary: The catalogue of supported values
+      description: |
+        Lets a client discover what the service supports instead of asking. The
+        chart code resolves names through the same catalogue, so nothing here can
+        be advertised without being supported.
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          description: Which part of the catalogue to serve.
+          schema:
+            type: string
+            enum: [bodies, signs, house-systems, aspects, ayanamshas]
+      responses:
+        "200":
+          description: The catalogue for that topic.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/time:
+    post:
+      tags: [time]
+      operationId: resolveTime
+      summary: Resolve a local reading into an instant
+      description: |
+        Turns a date, a time and a zone into an exact instant and a Julian Day.
+
+        This exists because time zone handling is where results most often
+        disagree between services. It exposes the conversion on its own, with the
+        zone, the offset, the daylight saving state and both Julian Days visible,
+        so a discrepancy can be settled without a support ticket.
+
+        Twice a year a local reading names no instant or two, and both cases are
+        reported in `flags.anomaly` rather than resolved quietly.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TimeRequest' }
+            examples:
+              namedZone:
+                summary: A birth in Istanbul while daylight saving was in force
+                value:
+                  datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+              ambiguous:
+                summary: A reading the clocks went back over, so it happened twice
+                value:
+                  datetime: { date: "2015-11-08", time: "03:30:00", timezone: "Europe/Istanbul" }
+      responses:
+        "200":
+          description: The instant the reading names.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/natal:
+    post:
+      tags: [charts]
+      operationId: castNatal
+      summary: Cast a birth chart
+      description: |
+        Bodies with their sign, house and essential dignity, the house cusps and
+        angles, the aspects between them, and the distribution across the
+        elements and modalities.
+
+        A chart with an unknown birth time returns positions but no houses,
+        angles or sect, all of which depend entirely on the time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChartRequest' }
+            examples:
+              istanbul1990:
+                summary: A birth chart with the defaults
+                value:
+                  datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                  location: { latitude: 41.0082, longitude: 28.9784 }
+              sidereal:
+                summary: The same birth in the sidereal zodiac with whole sign houses
+                value:
+                  datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                  location: { latitude: 41.0082, longitude: 28.9784 }
+                  settings: { zodiac: sidereal, ayanamsha: lahiri, house_system: whole_sign }
+      responses:
+        "200":
+          description: The chart.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NatalChart' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/transits:
+    post:
+      tags: [comparison]
+      operationId: getTransits
+      summary: The sky at a moment against a birth chart
+      description: |
+        Casts a birth chart, casts the sky at another moment, and reports the
+        aspects between them. `from` is always the transiting body and `to`
+        always the natal point; the natal angles are included as targets, since a
+        transit to the ascendant or midheaven is among the most watched of all.
+
+        Each aspect also carries `exact_at`, the moment it perfects. That is
+        absent when the transiting body is at a station, or when the crossing is
+        further off than a year, where the date would say more about the orb than
+        about the transit.
+
+        The transit chart defaults to the natal location, which is what makes its
+        houses readable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitRequest' }
+            examples:
+              today:
+                summary: Today's sky against a 1990 birth
+                value:
+                  natal:
+                    datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                    location: { latitude: 41.0082, longitude: 28.9784 }
+                  transit:
+                    datetime: { date: "2026-09-06", time: "12:00:00", timezone: "Europe/Istanbul" }
+      responses:
+        "200":
+          description: Both charts and the transits between them.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransitResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/synastry:
+    post:
+      tags: [comparison]
+      operationId: getSynastry
+      summary: Aspects between two birth charts
+      description: |
+        `from` names a point in the first chart and `to` a point in the second.
+        The two sets are never compared with themselves: each chart's internal
+        aspects belong to that chart and are reported with it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SynastryRequest' }
+      responses:
+        "200":
+          description: Both charts and the contacts between them.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SynastryResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/composite:
+    post:
+      tags: [comparison]
+      operationId: getComposite
+      summary: A relationship chart
+      description: |
+        The two methods are different techniques rather than variations on one,
+        and they routinely disagree by degrees.
+
+        `midpoint`, the default, puts every point halfway between the two charts,
+        taking the shorter way round the circle. Its houses come from the
+        midpoint of the two sidereal times at the midpoint of their latitudes,
+        rather than from halving each cusp, which can leave cusps out of order. A
+        midpoint composite is not a chart of any moment, so it reports neither a
+        time nor a place, and says so in its notes.
+
+        `davison` casts a real chart for the midpoint in time and in place. Its
+        positions were genuinely in the sky at that instant, so it reports both.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompositeRequest' }
+      responses:
+        "200":
+          description: The relationship chart and the two it came from.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompositeResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/progressions:
+    post:
+      tags: [time]
+      operationId: getProgressions
+      summary: A birth chart moved forward
+      description: |
+        `secondary`, the default, counts one day of the ephemeris for one year of
+        life, so a chart progressed to age thirty four is cast for thirty four
+        days after the birth. Every body moves at its own rate.
+
+        `solar_arc` moves every point forward by one arc, the distance the
+        progressed Sun has travelled, which comes to roughly a degree a year.
+        Because everything moves together the directed chart has exactly the
+        natal aspects, so only its contacts with the natal chart carry
+        information.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProgressionRequest' }
+      responses:
+        "200":
+          description: The progressed chart and its contacts with the natal one.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProgressionResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/returns:
+    post:
+      tags: [time]
+      operationId: getReturns
+      summary: Solar and lunar return charts
+      description: |
+        Finds when the Sun or the Moon comes back to the degree it held at birth,
+        and casts the chart of that moment. `count` asks for successive returns:
+        a solar return a year apart, a lunar one roughly every 27.32 days.
+
+        The moment is a fact about the body and does not depend on where the
+        chart is cast. `location` decides only the houses and defaults to the
+        birthplace; casting the return for wherever the person actually is at the
+        time is the other common practice.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReturnRequest' }
+            examples:
+              solar:
+                summary: The next solar return after the start of 2026
+                value:
+                  natal:
+                    datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                    location: { latitude: 41.0082, longitude: 28.9784 }
+                  body: sun
+                  from: { date: "2026-01-01", time: "00:00:00Z" }
+      responses:
+        "200":
+          description: The returns found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReturnsResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/ephemeris:
+    post:
+      tags: [sky]
+      operationId: getEphemeris
+      summary: Positions at regular intervals
+      description: |
+        A table of where the bodies are, not of how they fall for anyone in
+        particular, so it carries no houses: those depend on a place as well as a
+        moment.
+
+        At most 1000 rows are returned. A span and step that would exceed that is
+        refused rather than truncated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EphemerisRequest' }
+      responses:
+        "200":
+          description: The table.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EphemerisResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/moon/phases:
+    post:
+      tags: [sky]
+      operationId: getMoonPhases
+      summary: New, first quarter, full and last quarter moons
+      description: |
+        A phase is the angle between the Moon and the Sun reaching a quarter of
+        the circle, and each is solved for directly, so the response can be
+        checked against its own definition: at a new moon the two stand together,
+        at a full moon opposite.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RangeRequest' }
+            examples:
+              quarter:
+                summary: One quarter of a year
+                value:
+                  from: { date: "2026-09-01", time: "00:00:00Z" }
+                  to: { date: "2026-12-01", time: "00:00:00Z" }
+      responses:
+        "200":
+          description: The phases in the span.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MoonPhasesResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/retrogrades:
+    post:
+      tags: [sky]
+      operationId: getRetrogrades
+      summary: Stretches of backward motion
+      description: |
+        A station is where a body's speed passes through zero, so these are found
+        by solving on the speed rather than on the position.
+
+        A period already under way when the span opens, or still running when it
+        closes, is reported with the missing end absent rather than filled in
+        with a date that was never searched for.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetrogradeRequest' }
+      responses:
+        "200":
+          description: The periods in the span.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetrogradesResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/eclipses:
+    post:
+      tags: [sky]
+      operationId: getEclipses
+      summary: Solar and lunar eclipses
+      description: |
+        Note the difference between the two measures a solar eclipse carries.
+        `magnitude` is the fraction of the Sun's **diameter** the Moon covers and
+        passes one for a total eclipse, where the Moon is the larger disc.
+        `obscuration` is the fraction of the Sun's **disc** covered and never
+        does.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EclipseRequest' }
+      responses:
+        "200":
+          description: The eclipses in the span.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EclipsesResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/rise-set:
+    post:
+      tags: [sky]
+      operationId: getRiseSet
+      summary: Rise, set and meridian crossings
+      description: |
+        Any of the four times can be absent. Inside the polar circles a body can
+        stay above or below the horizon for weeks, and then it neither rises nor
+        sets, which the response says rather than inventing a time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RiseSetRequest' }
+      responses:
+        "200":
+          description: The crossings for each day.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RiseSetResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+components:
+  securitySchemes:
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Authentication is off when the deployment configures no keys, which is
+        the default for local development. `/health` and `/v1/license` are always
+        exempt.
+    BearerToken:
+      type: http
+      scheme: bearer
+      description: The same key may be sent as a bearer token instead.
+
+  responses:
+    BadRequest:
+      description: The body was not valid JSON, or carried a field the endpoint does not accept.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Validation:
+      description: The request parsed but does not describe something that can be calculated.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: |
+        No API key was sent, or it was not recognised. Only returned by a
+        deployment that has keys configured; `/health` and `/v1/license` are
+        exempt in any case.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: No such path or topic.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Problem:
+      type: object
+      description: An error as described by RFC 9457.
+      required: [title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: A URL documenting this error condition.
+        title:
+          type: string
+          examples: ["Validation failed"]
+        status:
+          type: integer
+          examples: [422]
+        detail:
+          type: string
+        instance:
+          type: string
+          description: The path the request was made to.
+        errors:
+          type: array
+          description: Per-field validation failures.
+          items: { $ref: '#/components/schemas/FieldError' }
+        request_id:
+          type: string
+          description: |
+            The handle for one specific call. Request bodies are never logged,
+            since a birth date, time and coordinate together identify a person,
+            so this is the only way to trace a request through the logs.
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          description: The path to the offending field, such as `chart_b.datetime.timezone`.
+          examples: ["datetime.timezone"]
+        message:
+          type: string
+          examples: ['"Europe/Constantinople" is not an IANA time zone name']
+
+    DateTimeInput:
+      type: object
+      description: |
+        A date and a time, in one of three forms. A named zone is preferred,
+        because only it carries the daylight saving rules that applied on a past
+        date. Naming the zone more than once is a contradiction and is refused.
+      required: [date]
+      properties:
+        date:
+          type: string
+          format: date
+          description: The calendar date, as YYYY-MM-DD.
+          examples: ["1990-06-15"]
+        time:
+          type: string
+          description: |
+            The local reading, as HH:MM or HH:MM:SS. It may carry a `Z` or an
+            offset suffix, in which case `timezone` and `utc_offset` must be
+            omitted.
+
+            When absent the birth time is treated as unknown: midday local is
+            assumed, `time_known` is false, and houses and angles are withheld.
+          examples: ["17:30:00", "14:30:00Z", "17:30:00+03:00"]
+        timezone:
+          type: string
+          description: An IANA zone name.
+          examples: ["Europe/Istanbul"]
+        utc_offset:
+          type: string
+          description: |
+            A fixed offset, taken at face value with no daylight saving rule
+            applied. Use it only when the offset itself is known to be correct.
+          pattern: '^[+-][0-9]{2}:?[0-9]{2}$'
+          examples: ["+03:00"]
+
+    Location:
+      type: object
+      description: A place on Earth. Latitude is positive north and longitude positive east.
+      required: [latitude, longitude]
+      properties:
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+          examples: [41.0082]
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+          examples: [28.9784]
+        altitude_m:
+          type: number
+          minimum: -500
+          maximum: 9000
+          default: 0
+          description: Only affects topocentric positions and rise and set times.
+
+    AspectSettings:
+      type: object
+      properties:
+        types:
+          type: array
+          description: Which aspects to look for. Defaults to the five major ones.
+          items: { $ref: '#/components/schemas/AspectName' }
+        orbs:
+          type: object
+          description: |
+            Overrides the base orb of individual bodies, in degrees. The orb
+            allowed for a pair is the larger of the two bodies', multiplied by
+            the aspect's factor, so the luminaries keep their wide orbs against
+            slower bodies.
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 30
+          examples: [{ sun: 8, moon: 8 }]
+
+    Settings:
+      type: object
+      description: Every field is optional and falls back to the default shown.
+      properties:
+        zodiac:
+          type: string
+          enum: [tropical, sidereal]
+          default: tropical
+        ayanamsha:
+          type: string
+          default: lahiri
+          description: Ignored unless `zodiac` is `sidereal`. See `/v1/reference/ayanamshas`.
+        house_system:
+          type: string
+          default: placidus
+          description: |
+            See `/v1/reference/house-systems`. Placidus and Koch are undefined
+            beyond about 66 degrees of latitude, and a request for one there is
+            refused rather than answered with degenerate cusps.
+        bodies:
+          type: array
+          description: Defaults to the thirteen of the modern Western set. See `/v1/reference/bodies`.
+          items: { $ref: '#/components/schemas/BodyName' }
+        topocentric:
+          type: boolean
+          default: false
+          description: Compute positions as seen from the observer rather than from the centre of the Earth. For the Moon the difference reaches about a degree.
+        aspects: { $ref: '#/components/schemas/AspectSettings' }
+
+    BodyName:
+      type: string
+      description: A body or calculated point. The full list is at `/v1/reference/bodies`.
+      examples: ["sun", "moon", "true_node", "chiron", "lilith"]
+
+    AspectName:
+      type: string
+      enum:
+        - conjunction
+        - opposition
+        - trine
+        - square
+        - sextile
+        - quincunx
+        - semisextile
+        - semisquare
+        - sesquiquadrate
+        - quintile
+        - biquintile
+
+    ChartRequest:
+      type: object
+      required: [datetime, location]
+      properties:
+        datetime: { $ref: '#/components/schemas/DateTimeInput' }
+        location: { $ref: '#/components/schemas/Location' }
+        settings: { $ref: '#/components/schemas/Settings' }
+
+    MomentRequest:
+      type: object
+      required: [datetime]
+      properties:
+        datetime: { $ref: '#/components/schemas/DateTimeInput' }
+        location:
+          allOf: [{ $ref: '#/components/schemas/Location' }]
+          description: Defaults to the natal location.
+
+    RangeRequest:
+      type: object
+      description: A span of time to search. At most fifty years may be covered at once.
+      required: [from, to]
+      properties:
+        from: { $ref: '#/components/schemas/DateTimeInput' }
+        to: { $ref: '#/components/schemas/DateTimeInput' }
+
+    Timezone:
+      type: object
+      description: The offset that was applied, and where it came from.
+      required: [name, offset, offset_seconds, is_dst, source]
+      properties:
+        name:
+          type: string
+          examples: ["Europe/Istanbul"]
+        abbreviation:
+          type: string
+          examples: ["EEST"]
+        offset:
+          type: string
+          examples: ["+03:00"]
+        offset_seconds:
+          type: integer
+          examples: [10800]
+        is_dst:
+          type: boolean
+        source:
+          type: string
+          enum: [iana, fixed_offset]
+          description: |
+            `iana` means a named zone supplied the historical rules.
+            `fixed_offset` means the offset was given directly and no daylight
+            saving rule was applied.
+
+    Dignity:
+      type: object
+      description: |
+        Essential dignity, present only for the seven classical planets. The
+        scheme predates the outer planets, and the rulerships assigned to them
+        since are modern additions that practitioners disagree about, so nothing
+        is reported for them rather than taking a side.
+      required: [term_ruler, face_ruler, score]
+      properties:
+        domicile: { type: boolean, description: In the sign it rules. }
+        exaltation: { type: boolean, description: In its sign of exaltation. }
+        detriment: { type: boolean, description: Opposite the sign it rules. }
+        fall: { type: boolean, description: Opposite its exaltation. }
+        triplicity: { type: boolean, description: "Rules the element by the sect of the chart, or participates in it." }
+        term_ruler:
+          type: string
+          description: The planet ruling the Egyptian bound the placement falls in.
+        face_ruler:
+          type: string
+          description: The planet ruling the Chaldean decan the placement falls in.
+        in_own_term: { type: boolean }
+        in_own_face: { type: boolean }
+        score:
+          type: integer
+          description: |
+            The Ptolemaic weights summed: domicile +5, exaltation +4, triplicity
+            +3, term +2, face +1, detriment -5, fall -4. A summary rather than a
+            verdict; practitioners weigh these differently.
+
+    Position:
+      type: object
+      description: |
+        Where a point is. Both the raw longitude and its decomposition into sign
+        and degree are present, so a client that computes never has to parse a
+        string and one that displays never has to divide the circle.
+      required: [body, longitude, sign, sign_index, degree_in_sign, formatted, latitude, speed, is_retrograde]
+      properties:
+        body:
+          type: string
+          examples: ["sun"]
+        label:
+          type: string
+          examples: ["Sun"]
+        longitude:
+          type: number
+          minimum: 0
+          exclusiveMaximum: 360
+          examples: [84.2290447]
+        sign:
+          type: string
+          examples: ["gemini"]
+        sign_index:
+          type: integer
+          minimum: 0
+          maximum: 11
+          description: Zero based from Aries, so Gemini is 2.
+        degree_in_sign:
+          type: number
+          examples: [24.2290447]
+        formatted:
+          type: string
+          examples: ["24°13'45\" Gemini"]
+        latitude:
+          type: number
+          description: Ecliptic latitude, in degrees.
+        distance_au:
+          type: number
+        declination:
+          type: number
+          description: The angle north or south of the celestial equator.
+        speed:
+          type: number
+          description: The change in longitude per day. Negative means retrograde.
+        is_retrograde:
+          type: boolean
+        house:
+          type: integer
+          minimum: 1
+          maximum: 36
+          description: Omitted when houses were not calculated.
+        house_position:
+          type: number
+          description: The fractional position within the house, so 8.53 is 53 percent of the way through the eighth.
+        dignity: { $ref: '#/components/schemas/Dignity' }
+
+    Cusp:
+      type: object
+      required: [house, longitude, sign, sign_index, degree_in_sign, formatted]
+      properties:
+        house: { type: integer }
+        longitude: { type: number }
+        sign: { type: string }
+        sign_index: { type: integer }
+        degree_in_sign: { type: number }
+        formatted: { type: string }
+
+    Houses:
+      type: object
+      required: [system, system_label, cusps, angles, armc]
+      properties:
+        system:
+          type: string
+          examples: ["placidus"]
+        system_label:
+          type: string
+          examples: ["Placidus"]
+        cusps:
+          type: array
+          description: Twelve houses in order, or thirty six sectors for the Gauquelin division.
+          items: { $ref: '#/components/schemas/Cusp' }
+        angles:
+          type: array
+          description: |
+            The ascendant, midheaven, descendant, imum coeli and vertex, in that
+            order. They are ordinary positions, so they carry aspects like any
+            other point.
+          items: { $ref: '#/components/schemas/Position' }
+        armc:
+          type: number
+          description: The right ascension of the midheaven, the sidereal time the division was built from.
+
+    Aspect:
+      type: object
+      required: [from, to, type, angle, separation, orb, max_orb, is_applying, is_exact]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        type: { $ref: '#/components/schemas/AspectName' }
+        angle:
+          type: number
+          description: The exact angle of the aspect, such as 120 for a trine.
+        separation:
+          type: number
+          description: The actual angle between the two positions.
+        orb:
+          type: number
+          description: How far the separation is from exact, always positive.
+        max_orb:
+          type: number
+          description: The widest orb this pair was allowed. The ratio of `orb` to `max_orb` measures how tight the aspect is.
+        is_applying:
+          type: boolean
+          description: True when the two are closing on the exact angle rather than moving apart.
+        is_exact:
+          type: boolean
+          description: True when the orb is under a minute of arc.
+        exact_at:
+          type: string
+          format: date-time
+          description: |
+            When the aspect perfects, for a comparison where one side moves and
+            the other stands still. Absent when nothing moves, when the moving
+            body is at a station, or when the crossing is further off than the
+            search allows. A body that turns retrograde over an aspect perfects
+            it three times; the nearest is reported.
+
+    Distribution:
+      type: object
+      description: How the bodies fall across the elements, modalities and polarities. Angles are not counted.
+      required: [elements, modalities, polarities]
+      properties:
+        elements:
+          type: object
+          additionalProperties: { type: integer }
+          examples: [{ fire: 1, earth: 4, air: 3, water: 5 }]
+        modalities:
+          type: object
+          additionalProperties: { type: integer }
+        polarities:
+          type: object
+          additionalProperties: { type: integer }
+
+    ChartMeta:
+      type: object
+      description: |
+        Everything that could change the result. When a client reports that a
+        chart disagrees with another service, the difference is almost always one
+        of these.
+      required: [utc, local, timezone, julian_day_ut, julian_day_tt, location, zodiac, bodies, aspect_types, obliquity, ephemeris, time_known, source]
+      properties:
+        utc: { type: string, format: date-time }
+        local: { type: string, format: date-time }
+        timezone: { $ref: '#/components/schemas/Timezone' }
+        julian_day_ut: { type: number }
+        julian_day_tt: { type: number }
+        location: { $ref: '#/components/schemas/Location' }
+        zodiac: { type: string, enum: [tropical, sidereal] }
+        ayanamsha:
+          type: string
+          description: Only present for a sidereal chart, where it played a part.
+        ayanamsha_degrees: { type: number }
+        house_system:
+          type: string
+          description: Only present when houses were calculated.
+        bodies:
+          type: array
+          items: { type: string }
+        aspect_types:
+          type: array
+          items: { type: string }
+        obliquity:
+          type: number
+          description: The tilt of the Earth's axis at this moment, in degrees.
+        ephemeris:
+          type: string
+          examples: ["Swiss Ephemeris 2.10.03"]
+        time_known:
+          type: boolean
+          description: False when no birth time was given and midday was assumed.
+        time_anomaly:
+          type: string
+          enum: [nonexistent, ambiguous]
+          description: Set when the clocks skipped or repeated the reading.
+        source:
+          type: string
+          format: uri
+          description: Where the source code of this service is published, as the AGPL requires.
+
+    NatalChart:
+      type: object
+      required: [bodies, aspects, distribution, meta]
+      properties:
+        bodies:
+          type: array
+          items: { $ref: '#/components/schemas/Position' }
+        houses:
+          allOf: [{ $ref: '#/components/schemas/Houses' }]
+          description: Absent when the birth time is unknown, since houses depend entirely on it.
+        aspects:
+          type: array
+          items: { $ref: '#/components/schemas/Aspect' }
+        distribution: { $ref: '#/components/schemas/Distribution' }
+        sect:
+          type: string
+          enum: [day, night]
+          description: A day chart has the Sun above the horizon. It decides which triplicity ruler applies.
+        notes:
+          type: array
+          description: Anything about the result a client should act on.
+          items: { type: string }
+        meta: { $ref: '#/components/schemas/ChartMeta' }
+
+    TimeRequest:
+      type: object
+      required: [datetime]
+      properties:
+        datetime: { $ref: '#/components/schemas/DateTimeInput' }
+        location: { $ref: '#/components/schemas/Location' }
+
+    TimeResponse:
+      type: object
+      required: [utc, local, timezone, julian_day, flags, meta]
+      properties:
+        utc: { type: string, format: date-time }
+        local: { type: string, format: date-time }
+        timezone: { $ref: '#/components/schemas/Timezone' }
+        julian_day:
+          type: object
+          required: [ut, tt]
+          properties:
+            ut: { type: number, description: "Universal Time, the scale positions are computed in." }
+            tt: { type: number, description: "Terrestrial Time, which runs ahead of it by delta T." }
+        flags:
+          type: object
+          required: [time_known]
+          properties:
+            time_known: { type: boolean }
+            anomaly:
+              type: string
+              enum: [nonexistent, ambiguous]
+              description: |
+                `nonexistent` means the clocks went forward over the reading, so
+                it never occurred. `ambiguous` means they went back over it, so
+                it occurred twice.
+            candidates:
+              type: array
+              description: Both instants, when the reading is ambiguous.
+              items: { type: string, format: date-time }
+        notes:
+          type: array
+          items: { type: string }
+        meta:
+          type: object
+          required: [ephemeris, delta_t_seconds, source]
+          properties:
+            ephemeris: { type: string }
+            delta_t_seconds: { type: number }
+            source: { type: string, format: uri }
+
+    TransitRequest:
+      type: object
+      required: [natal, transit]
+      properties:
+        natal: { $ref: '#/components/schemas/ChartRequest' }
+        transit: { $ref: '#/components/schemas/MomentRequest' }
+        settings:
+          allOf: [{ $ref: '#/components/schemas/Settings' }]
+          description: Applies to the transiting chart and the comparison. Defaults to the natal settings.
+
+    TransitResponse:
+      type: object
+      required: [natal, transit, aspects]
+      properties:
+        natal: { $ref: '#/components/schemas/NatalChart' }
+        transit: { $ref: '#/components/schemas/NatalChart' }
+        aspects:
+          type: array
+          description: '`from` is always the transiting side and `to` always the natal one.'
+          items: { $ref: '#/components/schemas/Aspect' }
+
+    SynastryRequest:
+      type: object
+      required: [chart_a, chart_b]
+      properties:
+        chart_a: { $ref: '#/components/schemas/ChartRequest' }
+        chart_b: { $ref: '#/components/schemas/ChartRequest' }
+        settings:
+          allOf: [{ $ref: '#/components/schemas/Settings' }]
+          description: Applies to the comparison. Defaults to the settings of the first chart.
+
+    SynastryResponse:
+      type: object
+      required: [chart_a, chart_b, aspects]
+      properties:
+        chart_a: { $ref: '#/components/schemas/NatalChart' }
+        chart_b: { $ref: '#/components/schemas/NatalChart' }
+        aspects:
+          type: array
+          description: '`from` names a point in the first chart and `to` a point in the second.'
+          items: { $ref: '#/components/schemas/Aspect' }
+
+    CompositeRequest:
+      type: object
+      required: [chart_a, chart_b]
+      properties:
+        chart_a: { $ref: '#/components/schemas/ChartRequest' }
+        chart_b: { $ref: '#/components/schemas/ChartRequest' }
+        method:
+          type: string
+          enum: [midpoint, davison]
+          default: midpoint
+        settings: { $ref: '#/components/schemas/Settings' }
+
+    CompositeResponse:
+      type: object
+      required: [method, bodies, aspects, distribution, chart_a, chart_b, meta]
+      properties:
+        method: { type: string, enum: [midpoint, davison] }
+        bodies:
+          type: array
+          items: { $ref: '#/components/schemas/Position' }
+        houses: { $ref: '#/components/schemas/Houses' }
+        aspects:
+          type: array
+          items: { $ref: '#/components/schemas/Aspect' }
+        distribution: { $ref: '#/components/schemas/Distribution' }
+        sect: { type: string, enum: [day, night] }
+        notes:
+          type: array
+          items: { type: string }
+        chart_a: { $ref: '#/components/schemas/NatalChart' }
+        chart_b: { $ref: '#/components/schemas/NatalChart' }
+        meta:
+          type: object
+          required: [method, zodiac, bodies, aspect_types, ephemeris, source]
+          properties:
+            method: { type: string }
+            zodiac: { type: string }
+            ayanamsha: { type: string }
+            house_system: { type: string }
+            bodies:
+              type: array
+              items: { type: string }
+            aspect_types:
+              type: array
+              items: { type: string }
+            ephemeris: { type: string }
+            source: { type: string, format: uri }
+            utc:
+              type: string
+              format: date-time
+              description: Only a Davison chart has a moment; a midpoint composite is a chart of none.
+            location:
+              allOf: [{ $ref: '#/components/schemas/Location' }]
+              description: Only a Davison chart has a place.
+            julian_day_ut: { type: number }
+
+    ProgressionRequest:
+      type: object
+      required: [natal, target]
+      properties:
+        natal: { $ref: '#/components/schemas/ChartRequest' }
+        target:
+          allOf: [{ $ref: '#/components/schemas/MomentRequest' }]
+          description: The date to progress to.
+        method:
+          type: string
+          enum: [secondary, solar_arc]
+          default: secondary
+        settings: { $ref: '#/components/schemas/Settings' }
+
+    ProgressionResponse:
+      type: object
+      required: [method, bodies, aspects, natal, meta]
+      properties:
+        method: { type: string, enum: [secondary, solar_arc] }
+        bodies:
+          type: array
+          items: { $ref: '#/components/schemas/Position' }
+        houses: { $ref: '#/components/schemas/Houses' }
+        aspects:
+          type: array
+          description: '`from` is the progressed point and `to` the natal one.'
+          items: { $ref: '#/components/schemas/Aspect' }
+        notes:
+          type: array
+          items: { type: string }
+        natal: { $ref: '#/components/schemas/NatalChart' }
+        meta:
+          type: object
+          required: [method, target_utc, elapsed_years, zodiac, bodies, aspect_types, ephemeris, source]
+          properties:
+            method: { type: string }
+            target_utc: { type: string, format: date-time }
+            elapsed_years:
+              type: number
+              description: The age at the target date.
+            progressed_utc:
+              type: string
+              format: date-time
+              description: |
+                The moment the secondary chart was cast for, a day past the birth
+                for each elapsed year. A solar arc is cast for no moment and
+                reports its arc instead.
+            arc_degrees:
+              type: number
+              description: The distance every point was moved, for a solar arc.
+            zodiac: { type: string }
+            ayanamsha: { type: string }
+            house_system: { type: string }
+            bodies:
+              type: array
+              items: { type: string }
+            aspect_types:
+              type: array
+              items: { type: string }
+            ephemeris: { type: string }
+            source: { type: string, format: uri }
+
+    ReturnRequest:
+      type: object
+      required: [natal, body, from]
+      properties:
+        natal: { $ref: '#/components/schemas/ChartRequest' }
+        body:
+          type: string
+          enum: [sun, moon]
+          description: The Sun for a solar return, the Moon for a lunar one.
+        from:
+          allOf: [{ $ref: '#/components/schemas/DateTimeInput' }]
+          description: The moment to search forward from. The first return at or after it is the one returned.
+        location:
+          allOf: [{ $ref: '#/components/schemas/Location' }]
+          description: Where to cast the chart. Defaults to the birthplace and affects only the houses.
+        count:
+          type: integer
+          minimum: 1
+          maximum: 24
+          default: 1
+        settings: { $ref: '#/components/schemas/Settings' }
+
+    ReturnsResponse:
+      type: object
+      required: [body, natal, returns, meta]
+      properties:
+        body: { type: string }
+        natal: { $ref: '#/components/schemas/NatalChart' }
+        returns:
+          type: array
+          items:
+            type: object
+            required: [exact_utc, natal_longitude, chart]
+            properties:
+              exact_utc:
+                type: string
+                format: date-time
+                description: The moment the body reached its natal degree.
+              natal_longitude:
+                type: number
+                description: The degree it returned to.
+              chart: { $ref: '#/components/schemas/NatalChart' }
+        meta:
+          type: object
+          required: [body, count, searched_from, location, ephemeris, source]
+          properties:
+            body: { type: string }
+            count: { type: integer }
+            searched_from: { type: string, format: date-time }
+            location: { $ref: '#/components/schemas/Location' }
+            ephemeris: { type: string }
+            source: { type: string, format: uri }
+
+    EphemerisRequest:
+      allOf:
+        - $ref: '#/components/schemas/RangeRequest'
+        - type: object
+          properties:
+            step_days:
+              type: number
+              exclusiveMinimum: 0
+              default: 1
+              description: The interval between rows.
+            settings: { $ref: '#/components/schemas/Settings' }
+
+    EphemerisResponse:
+      type: object
+      required: [rows, meta]
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            required: [utc, julian_day_ut, bodies]
+            properties:
+              utc: { type: string, format: date-time }
+              julian_day_ut: { type: number }
+              bodies:
+                type: array
+                items: { $ref: '#/components/schemas/Position' }
+        meta:
+          type: object
+          required: [step_days, rows, zodiac, bodies, ephemeris, source]
+          properties:
+            from: { type: string, format: date-time }
+            to: { type: string, format: date-time }
+            step_days: { type: number }
+            rows: { type: integer }
+            zodiac: { type: string }
+            ayanamsha: { type: string }
+            bodies:
+              type: array
+              items: { type: string }
+            ephemeris: { type: string }
+            source: { type: string, format: uri }
+
+    ListMeta:
+      type: object
+      required: [count, ephemeris, source]
+      properties:
+        count: { type: integer }
+        ephemeris: { type: string }
+        source: { type: string, format: uri }
+
+    MoonPhasesResponse:
+      type: object
+      required: [phases, meta]
+      properties:
+        phases:
+          type: array
+          items:
+            type: object
+            required: [phase, utc, moon, sun]
+            properties:
+              phase:
+                type: string
+                enum: [new_moon, first_quarter, full_moon, last_quarter]
+              utc: { type: string, format: date-time }
+              moon: { $ref: '#/components/schemas/Position' }
+              sun: { $ref: '#/components/schemas/Position' }
+        meta: { $ref: '#/components/schemas/ListMeta' }
+
+    RetrogradeRequest:
+      allOf:
+        - $ref: '#/components/schemas/RangeRequest'
+        - type: object
+          properties:
+            bodies:
+              type: array
+              description: |
+                Defaults to the planets that visibly retrograde, Mercury outwards.
+                The Sun and Moon never turn back and are refused.
+              items: { $ref: '#/components/schemas/BodyName' }
+
+    RetrogradesResponse:
+      type: object
+      required: [periods, meta]
+      properties:
+        periods:
+          type: array
+          items:
+            type: object
+            required: [body]
+            properties:
+              body: { type: string }
+              begins:
+                allOf: [{ $ref: '#/components/schemas/Station' }]
+                description: Absent when the period had already begun before the span.
+              ends:
+                allOf: [{ $ref: '#/components/schemas/Station' }]
+                description: Absent when the period was still running at the end of the span.
+              days:
+                type: number
+                description: The length of the period, when both ends are known.
+        meta: { $ref: '#/components/schemas/ListMeta' }
+
+    Station:
+      type: object
+      description: A moment a body's motion reverses, where its speed passes through zero.
+      required: [utc, position]
+      properties:
+        utc: { type: string, format: date-time }
+        position: { $ref: '#/components/schemas/Position' }
+
+    EclipseRequest:
+      allOf:
+        - $ref: '#/components/schemas/RangeRequest'
+        - type: object
+          properties:
+            kinds:
+              type: array
+              description: Defaults to both.
+              items:
+                type: string
+                enum: [solar, lunar]
+
+    EclipsesResponse:
+      type: object
+      required: [eclipses, meta]
+      properties:
+        eclipses:
+          type: array
+          items:
+            type: object
+            required: [kind, type, maximum_utc, sun, moon]
+            properties:
+              kind: { type: string, enum: [solar, lunar] }
+              type:
+                type: string
+                enum: [total, annular, hybrid, partial, penumbral, unknown]
+                description: A hybrid eclipse is total along part of its track and annular along the rest.
+              central:
+                type: boolean
+                description: The axis of the Moon's shadow meets the Earth. Only meaningful for a solar eclipse.
+              maximum_utc: { type: string, format: date-time }
+              sun: { $ref: '#/components/schemas/Position' }
+              moon: { $ref: '#/components/schemas/Position' }
+              greatest_at:
+                allOf: [{ $ref: '#/components/schemas/Location' }]
+                description: |
+                  Where a solar eclipse is deepest. A lunar eclipse looks the
+                  same from everywhere it can be seen, so it carries none of this.
+              magnitude:
+                type: number
+                description: The fraction of the Sun's diameter covered. Passes one for a total eclipse, where the Moon is the larger disc.
+              obscuration:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: The fraction of the Sun's disc covered.
+        meta: { $ref: '#/components/schemas/ListMeta' }
+
+    RiseSetRequest:
+      type: object
+      required: [from, location]
+      properties:
+        from:
+          allOf: [{ $ref: '#/components/schemas/DateTimeInput' }]
+          description: The day to start on. Only the date is used.
+        location: { $ref: '#/components/schemas/Location' }
+        days:
+          type: integer
+          minimum: 1
+          maximum: 366
+          default: 1
+        bodies:
+          type: array
+          description: Defaults to the Sun and the Moon.
+          items: { $ref: '#/components/schemas/BodyName' }
+
+    RiseSetResponse:
+      type: object
+      required: [location, days, meta]
+      properties:
+        location: { $ref: '#/components/schemas/Location' }
+        days:
+          type: array
+          items:
+            type: object
+            required: [date, bodies]
+            properties:
+              date: { type: string, format: date }
+              bodies:
+                type: array
+                items:
+                  type: object
+                  required: [body]
+                  properties:
+                    body: { type: string }
+                    rise: { type: string, format: date-time }
+                    set: { type: string, format: date-time }
+                    culmination:
+                      type: string
+                      format: date-time
+                      description: The highest point, crossing the meridian.
+                    nadir:
+                      type: string
+                      format: date-time
+                      description: The lowest, crossing the meridian below the horizon.
+        notes:
+          type: array
+          items: { type: string }
+        meta: { $ref: '#/components/schemas/ListMeta' }
+
+    VersionInfo:
+      type: object
+      required: [version]
+      properties:
+        version: { type: string }
+        revision:
+          type: string
+          description: The commit the running build came from, which the AGPL makes worth knowing.
+        modified:
+          type: boolean
+          description: True when the build carried uncommitted changes.
+        built_at: { type: string, format: date-time }
+        go: { type: string }
+
+    Health:
+      type: object
+      required: [status, uptime_seconds, version, ephemeris]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, draining]
+        uptime_seconds: { type: integer }
+        version: { $ref: '#/components/schemas/VersionInfo' }
+        ephemeris:
+          type: object
+          required: [version, check]
+          properties:
+            version:
+              type: string
+              examples: ["2.10.03"]
+            check:
+              type: string
+              enum: [ok, failed]
+              description: The result of a real calculation, not merely a report that the process is running.
+            error: { type: string }
+
+    Index:
+      type: object
+      required: [service, version, ephemeris, source, license, openapi, endpoints]
+      properties:
+        service: { type: string }
+        version: { $ref: '#/components/schemas/VersionInfo' }
+        ephemeris: { type: string }
+        source: { type: string, format: uri }
+        license: { type: string }
+        openapi:
+          type: string
+          description: Where this document is served.
+        endpoints:
+          type: array
+          items:
+            type: object
+            required: [path, method, description]
+            properties:
+              path: { type: string }
+              method: { type: string }
+              description: { type: string }
+
+    License:
+      type: object
+      required: [license, source, version, notice, components]
+      properties:
+        license: { type: string, examples: ["AGPL-3.0-or-later"] }
+        source: { type: string, format: uri }
+        version: { $ref: '#/components/schemas/VersionInfo' }
+        notice: { type: string }
+        components:
+          type: array
+          items:
+            type: object
+            required: [name, version, license, copyright, url]
+            properties:
+              name: { type: string }
+              version: { type: string }
+              license: { type: string }
+              copyright: { type: string }
+              url: { type: string, format: uri }
