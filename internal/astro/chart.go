@@ -159,6 +159,21 @@ func (e *Engine) cast(ctx context.Context, moment Moment, location Location, set
 		p.Dignity = DignityOf(p.Body, p.Longitude, chart.Sect)
 	}
 
+	// The nakshatras belong to the sidereal zodiac, so they are reported only
+	// where they mean something.
+	if settings.Zodiac == ZodiacSidereal {
+		for i := range chart.Positions {
+			placement := NakshatraAt(chart.Positions[i].Longitude)
+			chart.Positions[i].Nakshatra = &placement
+		}
+		if chart.Houses != nil {
+			for i := range chart.Houses.Angles {
+				placement := NakshatraAt(chart.Houses.Angles[i].Longitude)
+				chart.Houses.Angles[i].Nakshatra = &placement
+			}
+		}
+	}
+
 	// The angles take part in aspects like any other point, but they are
 	// reported with the houses rather than among the bodies.
 	aspectable := chart.Positions

@@ -30,10 +30,15 @@ every result.
 
 ## The API
 
-Twelve calculation endpoints: birth charts, transits, synastry, composites,
+Fourteen calculation endpoints: birth charts, transits, synastry, composites,
 progressions, returns, ephemeris tables, moon phases, retrograde periods,
-eclipses, rise and set times, and time zone resolution on its own. Five more
-cover health, discovery, the licence, the catalogue and this document.
+eclipses, rise and set times, time zone resolution on its own, and the two
+Indian techniques below. Five more cover health, discovery, the licence, the
+catalogue and this document.
+
+Both zodiacs are supported throughout. A sidereal chart also carries the
+nakshatra and pada of every position, and `/v1/vedic` adds the Vimshottari dasha
+and all sixteen divisional charts.
 
 The contract is described in [`api/openapi.yaml`](api/openapi.yaml), and the
 running service serves its own copy at `/v1/openapi.yaml`, so a client always

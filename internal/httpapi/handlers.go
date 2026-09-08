@@ -195,6 +195,20 @@ var referenceTopics = map[string]func() any{
 			"default":    astro.DefaultAyanamsha,
 		}
 	},
+	"nakshatras": func() any {
+		return map[string]any{
+			"nakshatras": astro.Nakshatras(),
+			"span":       astro.NakshatraSpan,
+			"pada_span":  astro.PadaSpan,
+			"padas_each": astro.PadasPerNakshatra,
+		}
+	},
+	"divisional-charts": func() any {
+		return map[string]any{
+			"divisional_charts": astro.Vargas(),
+			"default":           astro.DefaultVargas,
+		}
+	},
 }
 
 // referenceTopicNames lists the valid topics, for error messages and for the

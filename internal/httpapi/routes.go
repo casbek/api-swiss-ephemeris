@@ -44,6 +44,8 @@ func routeTable() []route {
 		{http.MethodPost, "/v1/retrogrades", "Stretches of backward motion, with their stations", (*Server).handleRetrogrades},
 		{http.MethodPost, "/v1/eclipses", "Solar and lunar eclipses", (*Server).handleEclipses},
 		{http.MethodPost, "/v1/rise-set", "Rise, set and meridian crossings at a place", (*Server).handleRiseSet},
+		{http.MethodPost, "/v1/vedic/dashas", "Vimshottari periods, read from the Moon's nakshatra", (*Server).handleDashas},
+		{http.MethodPost, "/v1/vedic/divisional", "Divisional charts, from the rashi chart to the shashtiamsha", (*Server).handleDivisionals},
 	}
 }
 

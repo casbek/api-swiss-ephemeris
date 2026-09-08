@@ -30,6 +30,12 @@ type Position struct {
 
 	// Dignity is present only for the seven classical planets.
 	Dignity *Dignity `json:"dignity,omitempty"`
+
+	// Nakshatra is the lunar mansion the position falls in, with its quarter.
+	// It is present only in a sidereal chart: the mansions are fixed to the
+	// stars rather than to the equinox, so reading them off a tropical
+	// longitude would put every one of them about twenty four degrees out.
+	Nakshatra *NakshatraPlacement `json:"nakshatra,omitempty"`
 }
 
 // newPosition fills in everything that follows from a longitude.

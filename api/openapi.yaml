@@ -61,6 +61,10 @@ tags:
     description: Moving a chart through time, and resolving moments.
   - name: sky
     description: Searching a span of time for events.
+  - name: vedic
+    description: |
+      Techniques of Indian astrology. They are read in the sidereal zodiac, so
+      these endpoints use it whether or not a request asks.
 
 # Listing an empty requirement alongside the two schemes marks authentication
 # as optional: it is off entirely when a deployment configures no keys.
@@ -161,7 +165,7 @@ paths:
           description: Which part of the catalogue to serve.
           schema:
             type: string
-            enum: [bodies, signs, house-systems, aspects, ayanamshas]
+            enum: [bodies, signs, house-systems, aspects, ayanamshas, nakshatras, divisional-charts]
       responses:
         "200":
           description: The catalogue for that topic.
@@ -540,6 +544,94 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "422": { $ref: '#/components/responses/Validation' }
 
+  /v1/vedic/dashas:
+    post:
+      tags: [vedic]
+      operationId: getDashas
+      summary: Vimshottari periods
+      description: |
+        Divides a life into periods ruled by the nine Vimshottari lords, running
+        a hundred and twenty years in all. Which lord opens the sequence, and how
+        much of that first period is already spent at birth, are both read from
+        where the Moon stood among the nakshatras.
+
+        Each period divides again by the same sequence and in the same
+        proportions. `depth` says how far to nest: one for the great periods
+        alone, three for the level below the sub-periods, which reaches periods
+        of a few days. A fourth level would reach hours, and no birth time is
+        known finely enough for that to mean anything.
+
+        `year_length` is worth setting deliberately. It is the single largest
+        reason two pieces of software put the boundaries in different places, and
+        whichever is used is reported back.
+
+        The nakshatras are fixed to the stars, so this is computed in the
+        sidereal zodiac. A request that asks for tropical is refused rather than
+        answered with periods that would be about two years out.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DashaRequest' }
+            examples:
+              currentPeriods:
+                summary: The periods running over one year, nested two deep
+                value:
+                  natal:
+                    datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                    location: { latitude: 41.0082, longitude: 28.9784 }
+                  depth: 2
+                  from: { date: "2026-01-01", time: "00:00:00Z" }
+                  to: { date: "2027-01-01", time: "00:00:00Z" }
+      responses:
+        "200":
+          description: The periods.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashaResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/vedic/divisional:
+    post:
+      tags: [vedic]
+      operationId: getDivisionalCharts
+      summary: Divisional charts
+      description: |
+        A divisional chart cuts each sign into equal parts and reads each part as
+        a sign of its own. The sixteen Parashara defines are supported, from the
+        rashi chart, which is no division at all, down to the shashtiamsha of
+        half a degree. See `/v1/reference/divisional-charts`.
+
+        A divisional chart places bodies in signs and nothing finer: it has no
+        longitudes of its own, so each entry reports the sign it landed in, which
+        part of its rashi sign produced it, and the longitude it was read from.
+
+        Two of the sixteen do not divide the sign evenly. The hora has two
+        halves that map only to Cancer and Leo, and the trimshamsha five
+        stretches of unequal width.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DivisionalRequest' }
+            examples:
+              navamsa:
+                summary: The rashi chart and the navamsa
+                value:
+                  natal:
+                    datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                    location: { latitude: 41.0082, longitude: 28.9784 }
+                  charts: [d1, d9]
+      responses:
+        "200":
+          description: The divisional charts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DivisionalResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
 components:
   securitySchemes:
     ApiKeyHeader:
@@ -886,6 +978,12 @@ components:
           type: number
           description: The fractional position within the house, so 8.53 is 53 percent of the way through the eighth.
         dignity: { $ref: '#/components/schemas/Dignity' }
+        nakshatra:
+          allOf: [{ $ref: '#/components/schemas/NakshatraPlacement' }]
+          description: |
+            Present only in a sidereal chart. The mansions are fixed to the
+            stars rather than to the equinox, so reading them off a tropical
+            longitude would put every one about twenty four degrees out.
 
     Cusp:
       type: object
@@ -1514,6 +1612,185 @@ components:
           type: array
           items: { type: string }
         meta: { $ref: '#/components/schemas/ListMeta' }
+
+    NakshatraPlacement:
+      type: object
+      description: |
+        Where a position falls among the twenty seven lunar mansions, each
+        13 degrees 20 minutes wide and quartered into padas.
+      required: [number, name, label, lord, pada, degree_in, fraction]
+      properties:
+        number:
+          type: integer
+          minimum: 1
+          maximum: 27
+        name: { type: string, examples: ["rohini"] }
+        label: { type: string, examples: ["Rohini"] }
+        lord:
+          type: string
+          description: |
+            The planet ruling the mansion, and the one whose Vimshottari period
+            a birth under it begins in.
+        pada:
+          type: integer
+          minimum: 1
+          maximum: 4
+        degree_in:
+          type: number
+          description: How far into the mansion the position lies, in degrees.
+        fraction:
+          type: number
+          minimum: 0
+          exclusiveMaximum: 1
+          description: |
+            The same as a proportion. The balance of the first dasha is read
+            from it.
+
+    DashaRequest:
+      type: object
+      required: [natal]
+      properties:
+        natal: { $ref: '#/components/schemas/ChartRequest' }
+        depth:
+          type: integer
+          minimum: 1
+          maximum: 3
+          default: 2
+          description: How far to nest the periods.
+        year_length:
+          type: string
+          enum: [julian, savana, tropical]
+          default: julian
+          description: |
+            How a dasha year is measured: 365.25 days, 360, or the 365.2422 the
+            seasons keep.
+        from:
+          allOf: [{ $ref: '#/components/schemas/DateTimeInput' }]
+          description: |
+            Narrows the answer to the periods overlapping a span. The periods
+            themselves keep their real boundaries.
+        to: { $ref: '#/components/schemas/DateTimeInput' }
+
+    DashaPeriod:
+      type: object
+      required: [level, lord, start, end, years]
+      properties:
+        level:
+          type: integer
+          description: 1 for a great period, 2 for a division of it, and so on.
+        lord: { type: string }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        years:
+          type: number
+          description: |
+            The length of the period. A first period is shorter than the full
+            share of its lord, because part of it was spent before birth.
+        periods:
+          type: array
+          description: |
+            The divisions of this period, when the requested depth reaches them.
+          items: { $ref: '#/components/schemas/DashaPeriod' }
+
+    DashaResponse:
+      type: object
+      required: [periods, natal, meta]
+      properties:
+        periods:
+          type: array
+          items: { $ref: '#/components/schemas/DashaPeriod' }
+        natal: { $ref: '#/components/schemas/NatalChart' }
+        meta:
+          type: object
+          required: [moon, nakshatra, starting_lord, balance_years, year_length, year_length_days, depth, zodiac, ayanamsha, ephemeris, source]
+          properties:
+            moon: { $ref: '#/components/schemas/Position' }
+            nakshatra: { $ref: '#/components/schemas/NakshatraPlacement' }
+            starting_lord: { type: string }
+            balance_years:
+              type: number
+              description: |
+                How much of the period of the first lord remained unspent at
+                birth.
+            year_length: { type: string }
+            year_length_days: { type: number }
+            depth: { type: integer }
+            zodiac: { type: string }
+            ayanamsha: { type: string }
+            ephemeris: { type: string }
+            source: { type: string, format: uri }
+
+    DivisionalRequest:
+      type: object
+      required: [natal]
+      properties:
+        natal: { $ref: '#/components/schemas/ChartRequest' }
+        charts:
+          type: array
+          description: |
+            The divisions wanted. Defaults to the rashi chart and the navamsa.
+          items:
+            type: string
+            enum: [d1, d2, d3, d4, d7, d9, d10, d12, d16, d20, d24, d27, d30, d40, d45, d60]
+
+    VargaPosition:
+      type: object
+      required: [body, sign, sign_index, division, rashi_longitude]
+      properties:
+        body: { type: string }
+        label: { type: string }
+        sign: { type: string }
+        sign_index: { type: integer, minimum: 0, maximum: 11 }
+        division:
+          type: integer
+          description: |
+            Which part of its rashi sign the body fell in, counting from one.
+        rashi_longitude:
+          type: number
+          description: |
+            The longitude the division was read from. A divisional chart has no
+            longitudes of its own.
+
+    VargaChart:
+      type: object
+      required: [name, label, divisions, purpose, bodies]
+      properties:
+        name: { type: string, examples: ["d9"] }
+        label: { type: string, examples: ["Navamsa"] }
+        divisions: { type: integer }
+        purpose:
+          type: string
+          description: |
+            The matter the division is traditionally read for. It names the
+            subject rather than interpreting it, the way a house number does.
+        ascendant:
+          allOf: [{ $ref: '#/components/schemas/VargaPosition' }]
+          description: |
+            The rising sign of the division. Absent when the birth time is
+            unknown.
+        bodies:
+          type: array
+          items: { $ref: '#/components/schemas/VargaPosition' }
+
+    DivisionalResponse:
+      type: object
+      required: [charts, natal, meta]
+      properties:
+        charts:
+          type: array
+          items: { $ref: '#/components/schemas/VargaChart' }
+        natal: { $ref: '#/components/schemas/NatalChart' }
+        meta:
+          type: object
+          required: [charts, zodiac, ayanamsha, ephemeris, source]
+          properties:
+            charts:
+              type: array
+              items: { type: string }
+            zodiac: { type: string }
+            ayanamsha: { type: string }
+            ephemeris: { type: string }
+            source: { type: string, format: uri }
 
     VersionInfo:
       type: object

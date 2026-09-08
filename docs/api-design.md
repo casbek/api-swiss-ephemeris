@@ -203,6 +203,8 @@ request.
 | `/v1/retrogrades` | POST | Stretches of backward motion, with their stations |
 | `/v1/eclipses` | POST | Solar and lunar eclipses |
 | `/v1/rise-set` | POST | Rise, set and meridian crossings at a place |
+| `/v1/vedic/dashas` | POST | Vimshottari periods, read from the Moon's nakshatra |
+| `/v1/vedic/divisional` | POST | Divisional charts, from the rashi chart to the shashtiamsha |
 | `/v1/time` | POST | Resolve a local reading into an instant and a Julian Day |
 | `/v1/reference/{topic}` | GET | Supported bodies, house systems, ayanamshas, aspects |
 | `/v1/license` | GET | Licence terms and a link to the source |
@@ -395,6 +397,57 @@ Rising and setting are per place and per day. Any of the four times can be
 absent: inside the polar circles a body can stay above or below the horizon for
 weeks, and then it neither rises nor sets, which the response says rather than
 inventing a time.
+
+## Indian astrology
+
+The techniques of this tradition are read in the sidereal zodiac, so the two
+endpoints under `/v1/vedic` use it whether or not a request asks. A request that
+explicitly asks for tropical is refused rather than answered: the nakshatras are
+fixed to the stars, and reading them off a tropical longitude would put every
+one about twenty four degrees out, which for a dasha means periods roughly two
+years wrong.
+
+Any sidereal chart, from any endpoint, also carries the nakshatra and pada of
+every position. A tropical chart does not, for the same reason.
+
+### Vimshottari dasha
+
+The cycle runs a hundred and twenty years through nine lords. Which one opens
+the sequence, and how much of that first period is already spent at birth, are
+both read from where the Moon stood among the twenty seven mansions. Each period
+divides again by the same sequence and in the same proportions, so a great
+period gives each of its divisions that lord's own share of a hundred and
+twenty.
+
+`depth` says how far to nest, up to three. A fourth level would reach periods of
+hours, and no birth time is known finely enough for that to mean anything.
+
+`year_length` deserves a deliberate choice. It is the single largest reason two
+pieces of software put the boundaries in different places: `julian` at 365.25
+days is the usual modern convention and the default, `savana` at 360 the older
+reckoning, `tropical` at 365.2422 the year the seasons keep. Whichever is used
+is reported back in the meta.
+
+`from` and `to` narrow the answer to the periods overlapping a span, which a
+client asking what is running now will want. The periods themselves are not
+trimmed to the window: a period is reported with its real boundaries, not cut
+off at the edge of the question.
+
+### Divisional charts
+
+A divisional chart cuts each sign into equal parts and reads each part as a sign
+of its own. All sixteen that Parashara defines are supported. What differs
+between them is only where the count starts, which is set by whether the sign is
+odd or even, movable, fixed or dual, or which element it belongs to.
+
+A divisional chart places bodies in signs and nothing finer. It has no
+longitudes of its own, so each entry reports the sign it landed in, which part
+of its rashi sign produced it, and the longitude it was read from.
+
+Two of the sixteen do not divide the sign evenly. The hora has two halves that
+map only to Cancer and Leo, the signs of the two luminaries. The trimshamsha has
+five stretches of unequal width, shared among the five planets that are neither
+luminary.
 
 ## House systems
 
