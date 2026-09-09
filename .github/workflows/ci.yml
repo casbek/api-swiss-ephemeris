@@ -76,3 +76,85 @@ jobs:
       # half: that the document is a valid one.
       - name: Lint
         run: npx --yes @redocly/cli@latest lint api/openapi.yaml
+
+  docker:
+    name: Build and smoke test the image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: swisseph-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Building the image only proves it compiles. What matters is that the
+      # thing that gets deployed answers correctly, so it is started and asked
+      # for a chart whose values are asserted elsewhere in this repository.
+      - name: Start it
+        run: |
+          docker run --detach --name api \
+            --publish 127.0.0.1:8080:8080 \
+            swisseph-api:ci
+
+          for _ in $(seq 1 40); do
+            if curl --silent --fail http://127.0.0.1:8080/health >/dev/null; then
+              exit 0
+            fi
+            sleep 0.5
+          done
+
+          echo "the container never became healthy"
+          docker logs api
+          exit 1
+
+      - name: Ask it for a chart
+        run: |
+          curl --silent --show-error --fail \
+            --header 'Content-Type: application/json' \
+            --data '{
+              "datetime": {"date": "1990-06-15", "time": "17:30:00", "timezone": "Europe/Istanbul"},
+              "location": {"latitude": 41.0082, "longitude": 28.9784}
+            }' \
+            http://127.0.0.1:8080/v1/natal > chart.json
+
+          sun=$(jq -r '.bodies[] | select(.body == "sun") | .longitude' chart.json)
+          echo "the Sun is at $sun"
+
+          # The reference value the calculation tests assert, to five decimal
+          # places. A mismatch here means the image is not reading the
+          # ephemeris files it shipped with, which is the failure that would
+          # otherwise go unnoticed: Swiss Ephemeris falls back to a coarser
+          # ephemeris rather than refusing to answer.
+          if [ "$(printf '%.5f' "$sun")" != "84.22904" ]; then
+            echo "the Sun should be at 84.22904"
+            cat chart.json
+            exit 1
+          fi
+
+          # The time zone database is embedded in the binary. On an image with
+          # no /usr/share/zoneinfo this is the only thing that makes a
+          # historical zone resolvable at all.
+          offset=$(jq -r '.meta.timezone.offset' chart.json)
+          if [ "$offset" != "+03:00" ]; then
+            echo "the 1990 offset for Europe/Istanbul came out as $offset, want +03:00"
+            exit 1
+          fi
+
+      - name: Check what the image is made of
+        run: |
+          # An image that has grown a shell or a package manager has stopped
+          # being the thing that was reviewed.
+          docker image inspect swisseph-api:ci --format 'size: {{.Size}} bytes'
+          docker run --rm --entrypoint /bin/sh swisseph-api:ci -c 'echo reachable' \
+            && { echo "the image has a shell in it"; exit 1; } || true
+
+      - name: Show the logs
+        if: always()
+        run: docker logs api || true

@@ -1,0 +1,67 @@
+# Running the service with Docker Compose.
+#
+#   docker compose up --build -d
+#   curl localhost:8080/health
+#
+# The port is bound to the loopback, so the service is reachable from the host
+# and from nothing else. Put nginx in front of it for anything public; see
+# deploy/nginx/swisseph-api.conf.
+
+services:
+  api:
+    build:
+      context: .
+      args:
+        # Stamps the build so /v1/license can name the exact source of what is
+        # running, which the AGPL asks for. Pass a tag when you have one:
+        #   VERSION=$(git describe --tags --always) docker compose build
+        VERSION: ${VERSION:-dev}
+
+    image: swisseph-api:${VERSION:-dev}
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # Leave empty and the service is open to anything that can reach it,
+      # which behind a loopback binding means the host. Set it before putting
+      # anything in front of it:
+      #   API_KEYS=$(openssl rand -hex 32)
+      API_KEYS: ${API_KEYS:-}
+
+      # Only needed if a browser will call the API directly. A server side
+      # client such as Laravel does not use it.
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+
+      # One worker serves thousands of charts a second. Raising it costs
+      # memory, since each thread keeps its own ephemeris file cache.
+      SWE_WORKERS: ${SWE_WORKERS:-1}
+
+    # The image carries no shell, so the health check is the binary probing
+    # itself. It runs a real calculation, so a passing check means the
+    # ephemeris files are readable and not merely that the process is up.
+    healthcheck:
+      test: ["CMD", "/api", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+    # The service reads its ephemeris files and answers HTTP. It needs nothing
+    # else, so the rest is taken away.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+    # Logs go to stdout and are capped here. An application that writes its own
+    # log file can fill a disk; this cannot.
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

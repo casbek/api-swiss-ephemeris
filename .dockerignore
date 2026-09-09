@@ -1,0 +1,23 @@
+# Everything the build does not read. Keeping the context small is not about
+# speed here, it is about the image never picking up something that was only
+# ever meant to stay on a developer's machine.
+
+.git
+.github
+.gitattributes
+.gitignore
+
+# Local settings. The container is configured through its environment.
+.env
+
+bin/
+dist/
+*.exe
+*.test
+*.out
+
+# Documentation and deployment recipes are read by people, not by the compiler.
+docs/
+deploy/
+README.md
+Makefile

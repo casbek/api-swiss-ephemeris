@@ -16,6 +16,15 @@ import (
 )
 
 func main() {
+	// The container image has no shell to run a health check with, so the
+	// binary probes itself. See healthcheck.go.
+	if isHealthcheck(os.Args[1:]) {
+		if err := runHealthcheck(); err != nil {
+			exitWith(err)
+		}
+		return
+	}
+
 	if err := run(); err != nil {
 		// The logger may not exist yet when configuration fails, so report
 		// to stderr and let the exit code carry the failure.
