@@ -103,6 +103,62 @@ is `+03:00`. Both are asserted in the test suite and in CI, so if either comes
 out differently on your server, something about the deployment is wrong rather
 than something about the request.
 
+## Connecting a client
+
+The service is a separate program that clients reach over HTTP. That is what
+keeps the licence boundary clean: this repository is AGPL, and an application
+that calls it across a network is its own work rather than a derivative of it.
+So write the client in your own project rather than copying one out of here.
+
+There is not much to it. Four things are worth getting right.
+
+**Send the zone, always.** A date with no time and no zone names no instant,
+and the service will say so. If the birth time is unknown, leave `time` out and
+give a `timezone` anyway; the service assumes midday, marks `time_known` false
+and withholds the houses, which depend entirely on the time of day.
+
+**Do not retry a rejected request.** A `422` names the field that was wrong and
+will name it again on every attempt. Retry connection failures only.
+
+**Keep the error body.** It carries the field that failed and a `request_id`.
+Collapsing that into "the request failed" throws away the only two things that
+make a report actionable, since request bodies are never logged.
+
+**Read `meta`.** It records the instant, the zone, the zodiac and the house
+system that produced the result. When someone says a chart disagrees with
+another site, the answer is nearly always in there.
+
+A worked example, in PHP:
+
+```php
+$response = Http::baseUrl(config('swisseph.base_url'))
+    ->timeout(5)
+    ->retry(2, 100, fn ($e) => $e instanceof ConnectionException, throw: false)
+    ->withHeaders(['X-API-Key' => config('swisseph.key')])
+    ->post('/v1/natal', [
+        'datetime' => ['date' => '1990-06-15', 'time' => '17:30:00', 'timezone' => 'Europe/Istanbul'],
+        'location' => ['latitude' => 41.0082, 'longitude' => 28.9784],
+        'settings' => ['house_system' => 'placidus'],
+    ]);
+
+if ($response->failed()) {
+    $body = $response->json();
+    throw new RuntimeException(sprintf(
+        '%s: %s [%s] (request %s)',
+        $body['title'],
+        $body['detail'] ?? '',
+        collect($body['errors'] ?? [])->map(fn ($e) => "{$e['field']}: {$e['message']}")->join('; '),
+        $body['request_id'] ?? '?',
+    ));
+}
+```
+
+If you are replacing an existing calculation rather than starting fresh, run
+both for a while and compare. Two independent implementations agreeing on the
+Sun and Moon to within a few arcseconds is good evidence that neither has
+drifted; a disagreement larger than the older one's stated accuracy is worth
+understanding before the switch.
+
 ## What to watch
 
 `GET /health` is the one to point a monitor at. It answers `200` when the
