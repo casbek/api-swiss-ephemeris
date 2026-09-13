@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -29,7 +30,8 @@ type Config struct {
 	// EphePath is the directory holding the .se1 ephemeris files.
 	EphePath string
 
-	// Workers is the number of OS threads reserved for Swiss Ephemeris.
+	// Workers is the number of OS threads reserved for Swiss Ephemeris. See
+	// defaultWorkers for why it is not simply one.
 	Workers int
 
 	LogLevel  slog.Level
@@ -99,11 +101,40 @@ func Load() (*Config, error) {
 func (c *Config) AuthEnabled() bool { return len(c.APIKeys) > 0 }
 
 func workers() (int, error) {
-	n := envInt("SWE_WORKERS", 1)
+	n := envInt("SWE_WORKERS", defaultWorkers())
 	if n < 1 {
 		return 0, fmt.Errorf("config: SWE_WORKERS must be at least 1, got %d", n)
 	}
 	return n, nil
+}
+
+// maxDefaultWorkers caps what is chosen automatically. Each worker keeps its
+// own cache of ephemeris file segments, so the cost of another one is memory,
+// and past a handful the benefit is small: the calculations are microseconds
+// and what these threads protect against is one long request holding up the
+// short ones behind it.
+const maxDefaultWorkers = 4
+
+// defaultWorkers picks how many calculation threads to reserve.
+//
+// One is not a good default in production. Swiss Ephemeris calls are
+// serialised through these threads, so with a single one a request that takes a
+// second holds up every request behind it, health checks included. A span
+// search can take that long, and the queue it forms is what a visitor
+// experiences as the site hanging.
+//
+// On Windows the answer has to be one whatever the machine looks like: the
+// library's state is shared between threads there rather than thread-local, so
+// running calculations in parallel would race. That is enforced in the pool;
+// choosing one here means a developer on Windows never meets the error.
+func defaultWorkers() int {
+	if runtime.GOOS == "windows" {
+		return 1
+	}
+	if n := runtime.NumCPU(); n < maxDefaultWorkers {
+		return n
+	}
+	return maxDefaultWorkers
 }
 
 func logLevel(s string) (slog.Level, error) {

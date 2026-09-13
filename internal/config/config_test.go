@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -21,8 +22,18 @@ func TestDefaults(t *testing.T) {
 	if c.Addr != "127.0.0.1:8080" {
 		t.Errorf("Addr = %q, want the loopback default", c.Addr)
 	}
-	if c.Workers != 1 {
-		t.Errorf("Workers = %d, want 1", c.Workers)
+	// The default is chosen for the platform rather than fixed, so the test
+	// asks for the same rule rather than a number.
+	if c.Workers != defaultWorkers() {
+		t.Errorf("Workers = %d, want the platform default %d", c.Workers, defaultWorkers())
+	}
+	if runtime.GOOS == "windows" && c.Workers != 1 {
+		t.Errorf("Workers = %d on Windows, where the library's state is shared between "+
+			"threads and more than one would race", c.Workers)
+	}
+	if runtime.GOOS != "windows" && c.Workers < 2 && runtime.NumCPU() > 1 {
+		t.Errorf("Workers = %d on a machine with %d cores; a single thread lets one long "+
+			"request hold up every short one behind it", c.Workers, runtime.NumCPU())
 	}
 	if c.AuthEnabled() {
 		t.Error("authentication should be off when no keys are configured")

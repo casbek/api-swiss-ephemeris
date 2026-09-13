@@ -37,9 +37,11 @@ services:
       # client such as Laravel does not use it.
       CORS_ORIGINS: ${CORS_ORIGINS:-}
 
-      # One worker serves thousands of charts a second. Raising it costs
-      # memory, since each thread keeps its own ephemeris file cache.
-      SWE_WORKERS: ${SWE_WORKERS:-1}
+      # Left unset the service reserves one calculation thread per core, up
+      # to four. They exist so a long span search cannot hold up the short
+      # requests behind it; each costs memory for its own ephemeris file
+      # cache. Set the variable only to deviate from that.
+      SWE_WORKERS: ${SWE_WORKERS:-}
 
     # The image carries no shell, so the health check is the binary probing
     # itself. It runs a real calculation, so a passing check means the

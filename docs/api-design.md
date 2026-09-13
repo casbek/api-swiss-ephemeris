@@ -427,6 +427,16 @@ the bodies and the settings together are a structured object, not a handful of
 query parameters. At most fifty years may be searched at once, and an ephemeris
 returns at most a thousand rows.
 
+`/v1/retrogrades` is the exception, and allows ten. The other searches either
+step in lunar months or hand the work to the library's own solver, so half a
+century of them costs a fraction of a second. A station has to be found by
+watching a body's speed pass through zero, which means sampling every body
+every day; fifty years of that runs over a second, and for that whole second it
+holds a calculation thread while everything else waits. Ten years comes in near
+a quarter of a second, in line with the rest. A longer stretch is still
+available a decade at a time. `/v1/transits/search` allows ten for the same
+reason.
+
 An ephemeris has no place, only moments, so it carries no houses: it is a table
 of where the bodies are, not of how they fall for anyone in particular.
 

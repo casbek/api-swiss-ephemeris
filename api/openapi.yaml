@@ -625,6 +625,12 @@ paths:
         A period already under way when the span opens, or still running when it
         closes, is reported with the missing end absent rather than filled in
         with a date that was never searched for.
+
+        At most ten years may be searched at once. Stations are found by
+        sampling every body every day, so this search costs considerably more
+        than the others and a longer span would hold a calculation thread while
+        other requests waited. A longer stretch can be covered a decade at a
+        time.
       requestBody:
         required: true
         content:
@@ -1004,7 +1010,11 @@ components:
 
     RangeRequest:
       type: object
-      description: A span of time to search. At most fifty years may be covered at once.
+      description: |
+        A span of time to search. At most fifty years may be covered at once,
+        except by `/v1/retrogrades` and `/v1/transits/search`, which allow ten:
+        both have to sample every body every day, and a longer span would hold
+        a calculation thread for seconds while other requests waited.
       required: [from, to]
       properties:
         from: { $ref: '#/components/schemas/DateTimeInput' }

@@ -16,7 +16,9 @@ RestartSec=2s
 Environment=APP_ENV=production
 Environment=LISTEN_ADDR=127.0.0.1:8080
 Environment=EPHE_PATH=/opt/swisseph-api/ephe
-Environment=SWE_WORKERS=1
+# SWE_WORKERS is deliberately absent: the service reserves one calculation
+# thread per core, up to four, which is what keeps a long span search from
+# holding up the short requests behind it. Set it here only to deviate.
 Environment=LOG_LEVEL=info
 
 # Keys are secrets and do not belong in a world readable unit file.

@@ -115,16 +115,9 @@ func (e *Engine) SearchTransits(ctx context.Context, req TransitSearchRequest) (
 		return nil, prefixField(err, "natal")
 	}
 
-	from, to, err := resolveRange(req.RangeRequest)
+	from, to, err := resolveRangeWithin(req.RangeRequest, maxTransitSearchYears)
 	if err != nil {
 		return nil, err
-	}
-	if years := (to.JulianDayUT - from.JulianDayUT) / tropicalYear; years > maxTransitSearchYears {
-		return nil, &tz.FieldError{
-			Field: "to",
-			Message: fmt.Sprintf("the span is %.0f years; at most %d may be searched for "+
-				"transits at once", years, maxTransitSearchYears),
-		}
 	}
 
 	settings := natal.Settings

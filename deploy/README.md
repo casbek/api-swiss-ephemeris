@@ -159,6 +159,34 @@ Sun and Moon to within a few arcseconds is good evidence that neither has
 drifted; a disagreement larger than the older one's stated accuracy is worth
 understanding before the switch.
 
+## How much work it can take at once
+
+Swiss Ephemeris calls run on a fixed set of OS threads, and `SWE_WORKERS` sets
+how many. Left unset the service takes one per core, up to four.
+
+The number is not about throughput. A chart is a couple of milliseconds, so one
+thread would serve far more of them than a website ever asks for. The threads
+are there because the work is not all the same size: a span search runs for a
+noticeable fraction of a second, and with a single thread every request that
+arrives meanwhile waits for it. Measured on one thread, a chart that takes two
+milliseconds alone took a full second behind one long search and three and a
+half behind three, and `/health` went with them, so a load balancer could pull a
+healthy instance out of rotation because it was merely busy.
+
+The searches that cost the most now cap their own spans, so the longest single
+request is around half a second rather than several. Four threads on top of that
+means three short requests can still be served while one of them runs.
+
+Raise it past the default only if the machine has cores to spare and the traffic
+is genuinely concurrent; each thread keeps its own cache of ephemeris file
+segments, so the cost is memory.
+
+In front of the service, the nginx configuration in `nginx/swisseph-api.conf`
+already limits each client address to 20 requests a second with a burst of 40,
+answering `429` beyond that. It is per address, so it stops one caller looping
+over a search endpoint from occupying every thread; it is not a substitute for
+API keys, which decide who may call at all.
+
 ## What to watch
 
 `GET /health` is the one to point a monitor at. It answers `200` when the

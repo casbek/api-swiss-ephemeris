@@ -22,7 +22,22 @@ const (
 	maxEclipses      = 200
 
 	// maxSearchYears bounds the span an event search may cover.
+	//
+	// Fifty years is what the cheap searches cost little to answer: half a
+	// century of eclipses takes about a seventh of a second and the same of
+	// moon phases about a quarter, because both step in lunar months or lean
+	// on the library's own search rather than walking day by day.
 	maxSearchYears = 50
+
+	// maxRetrogradeYears bounds the one search that does walk day by day.
+	//
+	// Finding a station means watching a body's speed pass through zero, which
+	// takes a sample a day for every body followed. Fifty years of that costs
+	// about one and a quarter seconds, and a request that long occupies a
+	// calculation thread for it while everything else waits. Ten years comes
+	// in near a quarter of a second, which is the same order as the other
+	// searches. A longer stretch is still available a decade at a time.
+	maxRetrogradeYears = 10
 )
 
 // synodicMonth is the average time from one new moon to the next, in days.
@@ -36,6 +51,12 @@ type RangeRequest struct {
 
 // resolveRange turns a span into two moments, checking it makes sense.
 func resolveRange(r RangeRequest) (from, to Moment, err error) {
+	return resolveRangeWithin(r, maxSearchYears)
+}
+
+// resolveRangeWithin is resolveRange for the searches whose cost grows faster
+// than the others, and which therefore allow a shorter span.
+func resolveRangeWithin(r RangeRequest, maxYears int) (from, to Moment, err error) {
 	if from, err = NewMoment(r.From); err != nil {
 		return Moment{}, Moment{}, prefixField(err, "from")
 	}
@@ -48,11 +69,11 @@ func resolveRange(r RangeRequest) (from, to Moment, err error) {
 			Message: "must be after from",
 		}
 	}
-	if days := to.JulianDayUT - from.JulianDayUT; days > maxSearchYears*tropicalYear {
+	if days := to.JulianDayUT - from.JulianDayUT; days > float64(maxYears)*tropicalYear {
 		return Moment{}, Moment{}, &tz.FieldError{
 			Field: "to",
 			Message: fmt.Sprintf("the span is %.0f years; at most %d may be searched at once",
-				days/tropicalYear, maxSearchYears),
+				days/tropicalYear, maxYears),
 		}
 	}
 	return from, to, nil
@@ -345,7 +366,7 @@ var defaultRetrogradeBodies = []string{
 // under way when the span opens, or still running when it closes, is reported
 // with the missing end absent rather than with a made up date.
 func (e *Engine) Retrogrades(ctx context.Context, req RetrogradeRequest) ([]RetrogradePeriod, error) {
-	from, to, err := resolveRange(req.RangeRequest)
+	from, to, err := resolveRangeWithin(req.RangeRequest, maxRetrogradeYears)
 	if err != nil {
 		return nil, err
 	}
