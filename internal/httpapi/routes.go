@@ -37,6 +37,7 @@ func routeTable() []route {
 		{http.MethodPost, "/v1/positions", "Where the bodies are at a moment, without houses or aspects", (*Server).handlePositions},
 		{http.MethodPost, "/v1/houses", "How the sky divides at a place and a moment, without the bodies", (*Server).handleHouses},
 		{http.MethodPost, "/v1/transits", "The sky at a moment and its aspects to a birth chart", (*Server).handleTransits},
+		{http.MethodPost, "/v1/transits/search", "When the transiting bodies will contact a chart, across a span", (*Server).handleTransitSearch},
 		{http.MethodPost, "/v1/synastry", "Aspects between two birth charts", (*Server).handleSynastry},
 		{http.MethodPost, "/v1/composite", "A relationship chart, by midpoint or Davison", (*Server).handleComposite},
 		{http.MethodPost, "/v1/progressions", "A birth chart moved forward, by secondary progression or solar arc", (*Server).handleProgressions},

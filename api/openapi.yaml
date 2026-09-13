@@ -375,6 +375,67 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "422": { $ref: '#/components/responses/Validation' }
 
+  /v1/transits/search:
+    post:
+      tags: [charts]
+      operationId: searchTransits
+      summary: When transits perfect
+      description: |
+        Asks the same question as `/v1/transits` from the other end: not what is
+        touching this chart now, but when it will. The answer is a list of
+        moments, each the instant a transiting body reaches the exact degree of
+        an aspect to a natal point.
+
+        A slow planet that turns retrograde over an aspect perfects it three
+        times, months apart, and all three are reported. `pass` and `passes`
+        number them, and `retrograde` tells the middle one from the two either
+        side: a triple contact reads direct, retrograde, direct.
+
+        `bodies` defaults to Mars and everything slower. The faster bodies are
+        left out on purpose. Over a single year against a full chart they
+        produce about six hundred and fifty contacts against a hundred and
+        fifty without them, since the Moon alone reaches every point some
+        thirteen times a year. Those contacts are real but they last hours, and
+        they bury the ones that last months. Ask for them by name when you want
+        them.
+
+        At most ten years may be searched at once and at most a thousand
+        contacts are returned; `meta.truncated` says when the limit was reached
+        rather than the end of the span.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitSearchRequest' }
+            examples:
+              nextTwoYears:
+                summary: Everything slow, against the whole chart
+                value:
+                  natal:
+                    datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                    location: { latitude: 41.0082, longitude: 28.9784 }
+                  from: { date: "2026-01-01", time: "00:00:00Z" }
+                  to: { date: "2028-01-01", time: "00:00:00Z" }
+              oneQuestion:
+                summary: When will Saturn square my Moon
+                value:
+                  natal:
+                    datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                    location: { latitude: 41.0082, longitude: 28.9784 }
+                  from: { date: "2026-01-01", time: "00:00:00Z" }
+                  to: { date: "2029-01-01", time: "00:00:00Z" }
+                  bodies: [saturn]
+                  points: [moon]
+                  aspects: [square]
+      responses:
+        "200":
+          description: The contacts, earliest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransitSearchResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
   /v1/synastry:
     post:
       tags: [comparison]
@@ -1694,6 +1755,100 @@ components:
           type: array
           items: { type: string }
         meta: { $ref: '#/components/schemas/ListMeta' }
+
+    TransitSearchRequest:
+      type: object
+      required: [natal, from, to]
+      properties:
+        natal: { $ref: '#/components/schemas/ChartRequest' }
+        from: { $ref: '#/components/schemas/DateTimeInput' }
+        to: { $ref: '#/components/schemas/DateTimeInput' }
+        bodies:
+          type: array
+          description: |
+            The transiting bodies to follow. Defaults to Mars and everything
+            slower.
+          items: { type: string }
+        points:
+          type: array
+          description: |
+            The natal points to watch. Defaults to everything in the chart, the
+            angles included.
+          items: { type: string }
+        aspects:
+          type: array
+          description: The contacts to look for. Defaults to the major five.
+          items: { type: string }
+        settings: { $ref: '#/components/schemas/Settings' }
+
+    TransitContact:
+      type: object
+      required: [transiting, natal, aspect, angle, exact_utc, julian_day_ut, transiting_longitude, natal_longitude, retrograde, pass, passes]
+      properties:
+        transiting: { type: string, examples: ["saturn"] }
+        natal: { type: string, examples: ["moon"] }
+        aspect: { type: string, examples: ["square"] }
+        angle: { type: number }
+        exact_utc: { type: string, format: date-time }
+        julian_day_ut: { type: number }
+        transiting_longitude:
+          type: number
+          description: Where the moving body stood at the contact.
+        natal_longitude:
+          type: number
+          description: Where the natal point stands. The two differ by the angle.
+        retrograde:
+          type: boolean
+          description: |
+            Whether the transiting body was moving backwards, which tells the
+            middle pass of a triple contact from the two either side.
+        pass:
+          type: integer
+          description: |
+            Which contact this is among those of the same body, point and
+            aspect within the span searched.
+        passes:
+          type: integer
+          description: |
+            How many there are. Three for a full retrograde loop; fewer when the
+            loop begins or ends outside the span, since only what was searched
+            can be counted.
+
+    TransitSearchResponse:
+      type: object
+      required: [contacts, natal, meta]
+      properties:
+        contacts:
+          type: array
+          description: Earliest first.
+          items: { $ref: '#/components/schemas/TransitContact' }
+        natal: { $ref: '#/components/schemas/NatalChart' }
+        meta:
+          type: object
+          required: [from, to, bodies, points, aspect_types, count, zodiac, ephemeris, source]
+          properties:
+            from: { type: string, format: date-time }
+            to: { type: string, format: date-time }
+            bodies:
+              type: array
+              items: { type: string }
+            points:
+              type: array
+              items: { type: string }
+            aspect_types:
+              type: array
+              items: { type: string }
+            count: { type: integer }
+            truncated:
+              type: boolean
+              description: |
+                Set when the search stopped at the limit rather than at the end
+                of the span.
+            zodiac: { type: string }
+            ayanamsha: { type: string }
+            house_system: { type: string }
+            ephemeris: { type: string }
+            source: { type: string, format: uri }
 
     PositionsRequest:
       type: object

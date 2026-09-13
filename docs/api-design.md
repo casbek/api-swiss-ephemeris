@@ -345,6 +345,34 @@ A validation failure names the half of the request it came from, so an error
 reads `chart_b.datetime.timezone` or `transit.datetime.timezone` rather than
 leaving a client to work out which chart was wrong.
 
+### Searching for transits
+
+`/v1/transits/search` asks the same question as `/v1/transits` from the other
+end: not what is touching this chart now, but when it will. The answer is a
+list of moments, each the instant a transiting body reaches the exact degree of
+an aspect to a natal point.
+
+The retrograde loops are why the endpoint is worth having. A slow planet that
+turns back over an aspect perfects it three times, months apart, and all three
+are reported. `pass` and `passes` number them, and `retrograde` tells the middle
+one from the two either side: a triple contact reads direct, retrograde,
+direct. A loop that begins or ends outside the span shows fewer, since only
+what was searched can be counted.
+
+Every aspect but the conjunction and the opposition has two exact degrees, one
+either side of the natal point, and both are searched. The two that coincide
+are searched once, or every contact would be reported twice.
+
+`bodies` defaults to Mars and everything slower, and the reason is what the
+answer looks like otherwise. Over a single year against a full chart the faster
+bodies bring the count from about a hundred and fifty to six hundred and fifty:
+the Moon alone reaches every point some thirteen times a year. Those contacts
+are real, but they last hours and they bury the ones that last months, which
+are what a list of dates is for. A client that wants them asks by name.
+
+At most ten years are searched at once and at most a thousand contacts
+returned. `meta.truncated` says which limit was reached.
+
 ### Composite charts
 
 The two methods are different techniques, not variations on one, and they

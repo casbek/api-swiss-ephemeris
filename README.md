@@ -30,8 +30,9 @@ every result.
 
 ## The API
 
-Sixteen calculation endpoints: birth charts, positions and house divisions on
-their own, transits, synastry, composites,
+Seventeen calculation endpoints: birth charts, positions and house divisions on
+their own, transits both at a moment and searched across a span, synastry,
+composites,
 progressions, returns, ephemeris tables, moon phases, retrograde periods,
 eclipses, rise and set times, time zone resolution on its own, and the two
 Indian techniques below. Five more cover health, discovery, the licence, the
