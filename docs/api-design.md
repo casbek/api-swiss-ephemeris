@@ -303,6 +303,31 @@ A chart is a day chart when the Sun is above the horizon, which is to say in
 houses seven to twelve. That decides which triplicity ruler applies, so the
 sect is reported alongside.
 
+## Asking for part of a chart
+
+A natal chart answers several questions at once: where the bodies are, how the
+sky divides where you stand, and how the two relate. `/v1/positions` and
+`/v1/houses` each answer one of them, so a client that wants only one does not
+have to ask for all three and discard the rest. Both return exactly what the
+chart contains, which the tests hold them to.
+
+`/v1/positions` takes no location unless it needs one. Where the bodies are is
+the same question wherever it is asked from, so the field is optional; it
+becomes required only with `settings.topocentric`, which measures from the
+observer rather than from the centre of the Earth. Left to default, that would
+measure from the point off the coast of Africa where the equator meets the
+prime meridian and be quietly wrong rather than obviously so.
+
+The endpoint reports no house and no dignity. Both would be inventions: the
+house needs a division that was not made, and the score's triplicity depends on
+the sect, which is a question about which side of the horizon the Sun is on.
+There is no horizon without a place and a time of day.
+
+`/v1/houses` requires both a location and a time of day, and defaults neither.
+Every cusp moves with the place, and the sky turns a full circle a day, so a
+request missing either is refused rather than answered for midday at zero
+latitude.
+
 ## Comparing two charts
 
 `/v1/transits`, `/v1/synastry` and `/v1/composite` all compare two sets of

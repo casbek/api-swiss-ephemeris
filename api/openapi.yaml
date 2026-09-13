@@ -252,6 +252,88 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "422": { $ref: '#/components/responses/Validation' }
 
+  /v1/positions:
+    post:
+      tags: [charts]
+      operationId: getPositions
+      summary: Body positions
+      description: |
+        Where the requested bodies are at a moment, and nothing else.
+
+        There are no houses here and no aspects, so there is also no essential
+        dignity: the sect a chart is read by depends on which side of the
+        horizon the Sun is, and there is no horizon without a place and a time
+        of day. Ask for a natal chart when you want those.
+
+        `location` is optional, because where the bodies are is the same
+        question wherever it is asked from. It is required only when
+        `settings.topocentric` is set, since those positions are measured from
+        the observer rather than from the centre of the Earth.
+
+        A sidereal request also carries the nakshatra and pada of each body, as
+        everywhere else.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PositionsRequest' }
+            examples:
+              geocentric:
+                summary: Where the bodies were, with no place involved
+                value:
+                  datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+              topocentric:
+                summary: Seen from a place, which the Moon is about a degree sensitive to
+                value:
+                  datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                  location: { latitude: 41.0082, longitude: 28.9784 }
+                  settings: { topocentric: true, bodies: [moon] }
+      responses:
+        "200":
+          description: The positions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PositionsResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/houses:
+    post:
+      tags: [charts]
+      operationId: getHouses
+      summary: House cusps and angles
+      description: |
+        How the sky divides at a place and a moment, and nothing else. No
+        bodies are calculated, so nothing is placed in the houses; the cusps
+        are the answer. A natal chart is the endpoint that puts the two
+        together.
+
+        Both `location` and a time of day are required, and neither is
+        defaulted. A house division is a division of the sky as seen from
+        somewhere, so every cusp moves with the place; and the sky turns a full
+        circle a day, so without the time there is nothing to divide. Guessing
+        either would answer a question nobody asked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HousesRequest' }
+            examples:
+              placidus:
+                summary: Placidus houses over Istanbul
+                value:
+                  datetime: { date: "1990-06-15", time: "17:30:00", timezone: "Europe/Istanbul" }
+                  location: { latitude: 41.0082, longitude: 28.9784 }
+                  settings: { house_system: placidus }
+      responses:
+        "200":
+          description: The division.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HousesResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "422": { $ref: '#/components/responses/Validation' }
+
   /v1/transits:
     post:
       tags: [comparison]
@@ -1612,6 +1694,88 @@ components:
           type: array
           items: { type: string }
         meta: { $ref: '#/components/schemas/ListMeta' }
+
+    PositionsRequest:
+      type: object
+      required: [datetime]
+      properties:
+        datetime: { $ref: '#/components/schemas/DateTimeInput' }
+        location:
+          allOf: [{ $ref: '#/components/schemas/Location' }]
+          description: |
+            Optional. Required only when settings.topocentric is set.
+        settings: { $ref: '#/components/schemas/Settings' }
+
+    PositionsResponse:
+      type: object
+      required: [bodies, meta]
+      properties:
+        bodies:
+          type: array
+          items: { $ref: '#/components/schemas/Position' }
+        meta:
+          type: object
+          required: [utc, local, timezone, julian_day_ut, julian_day_tt, zodiac, bodies, obliquity, ephemeris, time_known, source]
+          properties:
+            utc: { type: string, format: date-time }
+            local: { type: string, format: date-time }
+            timezone: { $ref: '#/components/schemas/Timezone' }
+            julian_day_ut: { type: number }
+            julian_day_tt: { type: number }
+            location:
+              allOf: [{ $ref: '#/components/schemas/Location' }]
+              description: |
+                Present only when one was given, since these positions do not
+                otherwise depend on a place.
+            zodiac: { type: string }
+            ayanamsha: { type: string }
+            ayanamsha_degrees: { type: number }
+            topocentric: { type: boolean }
+            bodies:
+              type: array
+              items: { type: string }
+            obliquity: { type: number }
+            ephemeris: { type: string }
+            time_known: { type: boolean }
+            time_anomaly: { type: string, enum: [nonexistent, ambiguous] }
+            source: { type: string, format: uri }
+
+    HousesRequest:
+      type: object
+      required: [datetime, location]
+      properties:
+        datetime:
+          allOf: [{ $ref: '#/components/schemas/DateTimeInput' }]
+          description: |
+            The time of day is required here. Houses turn with the sky, a full
+            circle a day, so a request without one is refused rather than
+            answered for midday.
+        location: { $ref: '#/components/schemas/Location' }
+        settings: { $ref: '#/components/schemas/Settings' }
+
+    HousesResponse:
+      type: object
+      required: [houses, meta]
+      properties:
+        houses: { $ref: '#/components/schemas/Houses' }
+        meta:
+          type: object
+          required: [utc, local, timezone, julian_day_ut, julian_day_tt, location, zodiac, house_system, obliquity, ephemeris, source]
+          properties:
+            utc: { type: string, format: date-time }
+            local: { type: string, format: date-time }
+            timezone: { $ref: '#/components/schemas/Timezone' }
+            julian_day_ut: { type: number }
+            julian_day_tt: { type: number }
+            location: { $ref: '#/components/schemas/Location' }
+            zodiac: { type: string }
+            ayanamsha: { type: string }
+            ayanamsha_degrees: { type: number }
+            house_system: { type: string }
+            obliquity: { type: number }
+            ephemeris: { type: string }
+            time_anomaly: { type: string, enum: [nonexistent, ambiguous] }
+            source: { type: string, format: uri }
 
     NakshatraPlacement:
       type: object

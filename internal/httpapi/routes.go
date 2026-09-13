@@ -34,6 +34,8 @@ func routeTable() []route {
 		{http.MethodGet, "/v1/reference/{topic}", "Supported bodies, signs, house systems, aspects and ayanamshas", (*Server).handleReference},
 		{http.MethodPost, "/v1/time", "Resolve a local date and time into an instant and a Julian Day", (*Server).handleTime},
 		{http.MethodPost, "/v1/natal", "Cast a birth chart: bodies, houses, aspects and dignities", (*Server).handleNatal},
+		{http.MethodPost, "/v1/positions", "Where the bodies are at a moment, without houses or aspects", (*Server).handlePositions},
+		{http.MethodPost, "/v1/houses", "How the sky divides at a place and a moment, without the bodies", (*Server).handleHouses},
 		{http.MethodPost, "/v1/transits", "The sky at a moment and its aspects to a birth chart", (*Server).handleTransits},
 		{http.MethodPost, "/v1/synastry", "Aspects between two birth charts", (*Server).handleSynastry},
 		{http.MethodPost, "/v1/composite", "A relationship chart, by midpoint or Davison", (*Server).handleComposite},

@@ -86,7 +86,9 @@ type EphemerisResult struct {
 //
 // Houses are not part of it: they depend on a place as well as a moment, and
 // an ephemeris is a table of where the bodies are, not of how they fall for
-// anyone in particular.
+// anyone in particular. Essential dignity is left out for the same reason,
+// since the sect a chart is read by depends on which side of the horizon the
+// Sun is, and there is no horizon without a place.
 func (e *Engine) Ephemeris(ctx context.Context, req EphemerisRequest) (*EphemerisResult, error) {
 	from, to, err := resolveRange(req.RangeRequest)
 	if err != nil {
@@ -140,9 +142,7 @@ func (e *Engine) Ephemeris(ctx context.Context, req EphemerisRequest) (*Ephemeri
 			if err != nil {
 				return err
 			}
-			for i := range positions {
-				positions[i].Dignity = nil // no sect without a place and a time of day
-			}
+			addNakshatras(settings, positions)
 
 			moment, err := MomentFromJD(jd)
 			if err != nil {

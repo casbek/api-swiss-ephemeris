@@ -54,21 +54,32 @@ type Chart struct {
 
 // Cast validates a request and computes the chart it describes.
 func (e *Engine) Cast(ctx context.Context, req ChartRequest) (*Chart, error) {
-	if err := req.Location.Validate(); err != nil {
-		return nil, err
-	}
-
-	moment, err := NewMoment(req.DateTime)
+	moment, settings, err := e.prepare(req.DateTime, req.Location, req.Settings)
 	if err != nil {
 		return nil, err
 	}
-
-	settings, err := ResolveSettings(req.Settings, req.Location)
-	if err != nil {
-		return nil, err
-	}
-
 	return e.cast(ctx, moment, req.Location, settings)
+}
+
+// prepare turns the three parts every request carries into the two things
+// every calculation needs. The endpoints that return only part of a chart go
+// through it as well, so a place or a setting is refused for the same reason
+// and with the same wording wherever it is sent.
+func (e *Engine) prepare(datetime tz.Input, location Location, in SettingsInput) (Moment, Settings, error) {
+	if err := location.Validate(); err != nil {
+		return Moment{}, Settings{}, err
+	}
+
+	moment, err := NewMoment(datetime)
+	if err != nil {
+		return Moment{}, Settings{}, err
+	}
+
+	settings, err := ResolveSettings(in, location)
+	if err != nil {
+		return Moment{}, Settings{}, err
+	}
+	return moment, settings, nil
 }
 
 // MomentFromJD rebuilds a moment from a Julian Day, for charts that are
@@ -159,19 +170,9 @@ func (e *Engine) cast(ctx context.Context, moment Moment, location Location, set
 		p.Dignity = DignityOf(p.Body, p.Longitude, chart.Sect)
 	}
 
-	// The nakshatras belong to the sidereal zodiac, so they are reported only
-	// where they mean something.
-	if settings.Zodiac == ZodiacSidereal {
-		for i := range chart.Positions {
-			placement := NakshatraAt(chart.Positions[i].Longitude)
-			chart.Positions[i].Nakshatra = &placement
-		}
-		if chart.Houses != nil {
-			for i := range chart.Houses.Angles {
-				placement := NakshatraAt(chart.Houses.Angles[i].Longitude)
-				chart.Houses.Angles[i].Nakshatra = &placement
-			}
-		}
+	addNakshatras(settings, chart.Positions)
+	if chart.Houses != nil {
+		addNakshatras(settings, chart.Houses.Angles)
 	}
 
 	// The angles take part in aspects like any other point, but they are
@@ -242,6 +243,23 @@ func declination(longitude, latitude, obliquity float64) float64 {
 
 	sinDec := math.Sin(lat)*math.Cos(eps) + math.Cos(lat)*math.Sin(eps)*math.Sin(lon)
 	return math.Asin(sinDec) * 180 / math.Pi
+}
+
+// addNakshatras fills in the lunar mansion each position falls in, but only in
+// a sidereal chart.
+//
+// The mansions are fixed to the stars rather than to the equinox, so reading
+// one off a tropical longitude would put it about twenty four degrees out.
+// Every endpoint that returns positions goes through here, so none of them can
+// answer that question differently from the others.
+func addNakshatras(settings Settings, positions []Position) {
+	if settings.Zodiac != ZodiacSidereal {
+		return
+	}
+	for i := range positions {
+		placement := NakshatraAt(positions[i].Longitude)
+		positions[i].Nakshatra = &placement
+	}
 }
 
 // sunHouse finds which house the Sun is in, or 0 if the Sun was not requested.
