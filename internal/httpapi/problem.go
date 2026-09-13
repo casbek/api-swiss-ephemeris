@@ -72,11 +72,6 @@ func NotFound(detail string) *Problem {
 	return newProblem(http.StatusNotFound, "not-found", "Not found", detail)
 }
 
-// MethodNotAllowed reports a path used with the wrong method.
-func MethodNotAllowed(detail string) *Problem {
-	return newProblem(http.StatusMethodNotAllowed, "method-not-allowed", "Method not allowed", detail)
-}
-
 // Validation reports input that parsed but does not describe a chart that can
 // be calculated.
 func Validation(detail string, fields ...FieldError) *Problem {
@@ -96,12 +91,6 @@ func PayloadTooLarge(detail string) *Problem {
 func Internal() *Problem {
 	return newProblem(http.StatusInternalServerError, "internal-error", "Internal server error",
 		"The request could not be completed. Quote the request id when reporting this.")
-}
-
-// ServiceUnavailable reports that the service is running but cannot serve
-// requests, for instance while shutting down.
-func ServiceUnavailable(detail string) *Problem {
-	return newProblem(http.StatusServiceUnavailable, "service-unavailable", "Service unavailable", detail)
 }
 
 // WriteProblem sends a problem response, filling in the instance and request

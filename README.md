@@ -52,6 +52,11 @@ The document cannot fall behind the code: the route table is the single source
 for the mux, the index and the tests, and the tests fail if anything is served
 without being documented or documented without being served.
 
+Errors are RFC 9457 problem documents, and each one's `type` links to the
+section of [`docs/errors.md`](docs/errors.md) describing it, which says what
+causes that error and whether retrying is worth anything. That document is held
+to the code by tests too.
+
 ```sh
 curl -s localhost:8080/v1/natal -H 'Content-Type: application/json' -d '{
   "datetime": {"date": "1990-06-15", "time": "17:30:00", "timezone": "Europe/Istanbul"},
