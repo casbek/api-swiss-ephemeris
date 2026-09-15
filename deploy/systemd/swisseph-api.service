@@ -14,7 +14,7 @@ Restart=on-failure
 RestartSec=2s
 
 Environment=APP_ENV=production
-Environment=LISTEN_ADDR=127.0.0.1:8080
+Environment=LISTEN_ADDR=127.0.0.1:9000
 Environment=EPHE_PATH=/opt/swisseph-api/ephe
 # SWE_WORKERS is deliberately absent: the service reserves one calculation
 # thread per core, up to four, which is what keeps a long span search from
